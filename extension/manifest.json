@@ -1,8 +1,10 @@
 {
   "manifest_version": 3,
-  "name": "OpenDia",
-  "version": "1.1.1",
-  "description": "Connect your browser to AI models",
+  "name": "claude-for-arc (неофициальное)",
+  "version": "0.1.0",
+  "description": "Неофициальный мост между Claude и браузером Arc. Не связан с Anthropic. Основано на OpenDia (MIT).",
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAokQKyFv2Mwapwp43l5BbziJ6/3o2k8aqwSfNwOjsUDWzQ59Nk8WxN1vSlFrirx+c2KcKKqadw97H35T29Pw1TjvTFnrTeXlaasij7S4LX3/5kn98u8wiZnEOoZBNexk5u8AdSVV53Tkb9g+m3cfdxQWkTWA06GDltCPKzdEGrLcm2QGTztfFIsyV0uS0B4NAc078J3MJpf5xHGpt4cZaFCCCDTANiHIO07J2L4LIf45GaqQSqvr6VSe6tbi/ZVHxvBUgI7At8K4ueESjLYcmvbUgnxOl1Sr603/TlzZvSN4Og8bZIU6O8oIB9hYiEaa0Yv+C4Uz7C5pXeYzJPkaO+QIDAQAB",
+  "minimum_chrome_version": "120",
   "icons": {
     "16": "icons/icon-16.png",
     "32": "icons/icon-32.png",
@@ -11,11 +13,13 @@
   },
   "permissions": [
     "tabs",
-    "activeTab",
     "storage",
     "scripting",
-    "bookmarks",
-    "history"
+    "alarms"
+  ],
+  "optional_permissions": [
+    "history",
+    "bookmarks"
   ],
   "host_permissions": [
     "<all_urls>"
@@ -26,19 +30,9 @@
   },
   "action": {
     "default_popup": "src/popup/popup.html",
-    "default_title": "OpenDia"
+    "default_title": "claude-for-arc"
   },
-  "content_scripts": [
-    {
-      "matches": ["<all_urls>"],
-      "js": ["src/polyfill/browser-polyfill.min.js", "src/content/content.js"],
-      "run_at": "document_idle"
-    }
-  ],
-  "web_accessible_resources": [
-    {
-      "resources": ["src/polyfill/browser-polyfill.min.js"],
-      "matches": ["<all_urls>"]
-    }
-  ]
+  "content_security_policy": {
+    "extension_pages": "script-src 'self'; object-src 'none'; connect-src ws://127.0.0.1:*"
+  }
 }

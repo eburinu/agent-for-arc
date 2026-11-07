@@ -46,6 +46,22 @@ const ANTI_DETECTION_PLATFORMS = {
   },
 };
 
+// claude-for-arc: fields whose contents must never be read or written by the model.
+const SENSITIVE_AUTOCOMPLETE = /(^|\s)(current-password|new-password|one-time-code|cc-number|cc-csc|cc-exp|cc-exp-month|cc-exp-year)(\s|$)/i;
+const SENSITIVE_NAME = /(^|[^a-z])(pass(word|wd|code|phrase)?|pwd|pin|cvv|cvc|csc|otp|2fa|totp)([^a-z]|$)|card.?number|security.?code/i;
+
+function isSensitiveField(element) {
+  if (!element || element.tagName !== "INPUT" && element.tagName !== "TEXTAREA") return false;
+  if ((element.type || "").toLowerCase() === "password") return true;
+  if (SENSITIVE_AUTOCOMPLETE.test(element.getAttribute("autocomplete") || "")) return true;
+  // Split camelCase so "userPassword" reads as "user Password" but "shipping" stays one word.
+  const label = [element.name, element.id, element.getAttribute("aria-label")]
+    .filter(Boolean)
+    .join(" ")
+    .replace(/([a-z])([A-Z])/g, "$1 $2");
+  return SENSITIVE_NAME.test(label);
+}
+
 // Upper bound per element registry, so a long-lived tab can't grow it forever.
 const MAX_REGISTRY_ENTRIES = 1000;
 
@@ -89,10 +105,18 @@ class BrowserAutomation {
         case "element_click":
           result = await this.clickElement(data);
           break;
-        case "element_fill":
-          // 🎯 CRITICAL: Anti-Detection Bypass Implementation
+        case "element_fill": {
+          // claude-for-arc: passwords, one-time codes and card data are typed
+          // by the user, never by the model.
+          const target = this.getElementById(data.element_id);
+          if (target && isSensitiveField(target)) {
+            throw new Error(
+              "claude-for-arc: это поле для пароля, кода или данных карты — его заполняет только пользователь"
+            );
+          }
           result = await this.fillElementWithAntiDetection(data);
           break;
+        }
         case "wait_for":
           result = await this.waitForCondition(data);
           break;
@@ -105,7 +129,9 @@ class BrowserAutomation {
             element_id: data.element_id,
             element_name: this.getElementName(element),
             state: this.getElementState(element),
-            current_value: this.getElementValue(element),
+            current_value: isSensitiveField(element)
+              ? "[скрыто claude-for-arc]"
+              : this.getElementValue(element),
           };
           break;
         case "get_page_links":

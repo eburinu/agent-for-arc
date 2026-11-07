@@ -3,277 +3,205 @@ if (typeof browser === 'undefined' && typeof chrome !== 'undefined') {
   globalThis.browser = chrome;
 }
 
-// Browser detection
+import * as guard from "./guard.js";
+
+// Browser detection (kept for upstream code paths that branch on it)
 const browserInfo = {
-  isFirefox: typeof browser !== 'undefined' && browser.runtime.getManifest().applications?.gecko,
-  isChrome: typeof chrome !== 'undefined' && !browser.runtime.getManifest().applications?.gecko,
-  isServiceWorker: typeof importScripts === 'function',
+  isFirefox: false,
+  isChrome: true,
+  isServiceWorker: true,
   manifestVersion: browser.runtime.getManifest().manifest_version
 };
 
-console.log('🌐 Browser detected:', browserInfo);
+// ---------------------------------------------------------------------------
+// Connection to the claude-for-arc server
+//
+// The server listens on ws://127.0.0.1:<port> (5555 by default). Before this
+// extension registers tools or runs a single command, both sides prove they
+// hold the same token (pasted into the popup) with an HMAC challenge, so a
+// different program listening on the port cannot drive the browser.
 
-// MCP Server connection configuration
-let MCP_SERVER_URL = 'ws://localhost:5555'; // Default, will be auto-discovered
-let lastKnownPorts = { websocket: 5555, http: 5556 }; // Cache for port discovery
+const encoder = new TextEncoder();
+let hmacKeyPromise = null;
+let hmacKeyToken = null;
 
-// Safety Mode configuration
-let safetyModeEnabled = false;
-const WRITE_EDIT_TOOLS = [
-  'element_click',
-  'element_fill'
-];
-
-// Load safety mode state on startup
-browser.storage.local.get(['safetyMode'], (result) => {
-  safetyModeEnabled = result.safetyMode || false;
-});
-
-// HTTP port the user set in the popup, or null. Read fresh on every discovery
-// so a change applies without restarting the extension. Promise form, so it
-// works on both Chrome MV3 and Firefox's native browser.* API.
-async function getCustomHttpPort() {
-  try {
-    const result = await browser.storage.local.get('customHttpPort');
-    const port = Number(result?.customHttpPort);
-    return Number.isInteger(port) && port >= 1 && port <= 65535 ? port : null;
-  } catch (error) {
-    return null;
+function hmacKey(token) {
+  if (token !== hmacKeyToken) {
+    hmacKeyToken = token;
+    hmacKeyPromise = crypto.subtle.importKey(
+      "raw", encoder.encode(token), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]
+    );
   }
+  return hmacKeyPromise;
 }
 
-// Cross-browser WebSocket connection manager
+async function hmacHex(token, ...parts) {
+  const signature = await crypto.subtle.sign("HMAC", await hmacKey(token), encoder.encode(parts.join("|")));
+  return [...new Uint8Array(signature)].map((b) => b.toString(16).padStart(2, "0")).join("");
+}
+
+function randomHex(bytes = 32) {
+  return [...crypto.getRandomValues(new Uint8Array(bytes))].map((b) => b.toString(16).padStart(2, "0")).join("");
+}
+
+function constantTimeEqual(a, b) {
+  if (typeof a !== "string" || typeof b !== "string" || a.length !== b.length) return false;
+  let diff = 0;
+  for (let i = 0; i < a.length; i++) diff |= a.charCodeAt(i) ^ b.charCodeAt(i);
+  return diff === 0;
+}
+
+const KEEPALIVE_MS = 20000;
+const RECONNECT_ALARM = "cfa-reconnect";
+
 class ConnectionManager {
   constructor() {
     this.mcpSocket = null;
-    this.reconnectTimer = null;
-    this.reconnectAttempts = 0;
-    this.heartbeatInterval = null;
-    this.isServiceWorker = browserInfo.isServiceWorker;
-    this.isFirefox = browserInfo.isFirefox;
+    this.authenticated = false;
+    this.state = "offline"; // offline | connecting | connected | nokey | badkey
+    this.keepalive = null;
+    this.connecting = null;
   }
 
-  // Resolves once the socket is usable, so callers can't send on a CONNECTING
-  // socket. Uses addEventListener so the onopen/onerror/onclose handlers
-  // assigned in createConnection stay intact.
-  waitForSocketOpen(socket, timeoutMs = 5000) {
-    if (socket.readyState === WebSocket.OPEN) return Promise.resolve();
-
-    return new Promise((resolve, reject) => {
-      const cleanup = () => {
-        clearTimeout(timer);
-        socket.removeEventListener('open', onOpen);
-        socket.removeEventListener('error', onFail);
-        socket.removeEventListener('close', onFail);
-      };
-      const onOpen = () => { cleanup(); resolve(); };
-      const onFail = () => {
-        cleanup();
-        reject(new Error(`Could not reach the OpenDia server at ${MCP_SERVER_URL}`));
-      };
-      const timer = setTimeout(() => {
-        cleanup();
-        reject(new Error(`Timed out connecting to ${MCP_SERVER_URL} after ${timeoutMs}ms`));
-      }, timeoutMs);
-
-      socket.addEventListener('open', onOpen);
-      socket.addEventListener('error', onFail);
-      socket.addEventListener('close', onFail);
-    });
-  }
-
-  // Reuse a live socket: reconnecting per operation replaced the socket the
-  // request arrived on, so the reply was written to a CONNECTING socket.
   async connect() {
-    if (!this.mcpSocket || this.mcpSocket.readyState !== WebSocket.OPEN) {
-      await this.createConnection();
-    }
+    if (this.mcpSocket && this.mcpSocket.readyState === WebSocket.OPEN && this.authenticated) return;
+    if (this.connecting) return this.connecting;
+    this.connecting = this.createConnection().finally(() => { this.connecting = null; });
+    return this.connecting;
+  }
+
+  setState(state) {
+    this.state = state;
+    guard.setBadge(state);
   }
 
   async createConnection() {
-    try {
-      // Try port discovery if using default URL or if connection failed
-      if (MCP_SERVER_URL === 'ws://localhost:5555' || this.reconnectAttempts > 2) {
-        await this.discoverServerPorts();
-        // Deliberately no reset: finding a port is not evidence the connection
-        // opened. The reset lives in onopen so backoff can actually grow.
-      }
+    await guard.ready;
+    const { token, port } = guard.getSettings();
+    if (!/^[0-9a-f]{64}$/.test(token || "")) {
+      this.setState("nokey");
+      throw new Error("Нет ключа подключения");
+    }
 
-      console.log('🔗 Connecting to MCP server at', MCP_SERVER_URL);
-      // Handlers are bound to this specific socket. The server closes the old
-      // socket when the extension reconnects, so a stale close event can arrive
-      // after a healthy one is live; without the identity check it would clear
-      // the new connection's heartbeat and arm a reconnect that never clears.
-      // Mirrors the `chromeExtensionSocket === ws` guard on the server side.
-      const socket = new WebSocket(MCP_SERVER_URL);
-      this.mcpSocket = socket;
+    this.closeSocket();
+    this.setState("connecting");
+    const socket = new WebSocket(`ws://127.0.0.1:${Number(port) || 5555}`);
+    this.mcpSocket = socket;
+    this.authenticated = false;
+    const clientNonce = randomHex();
+    let serverNonce = null;
 
-      socket.onopen = () => {
-        if (this.mcpSocket !== socket) return;
-        console.log('✅ Connected to MCP server');
-        this.clearReconnectTimer();
-        this.reconnectAttempts = 0; // Reset attempts on successful connection
-
-        const tools = getAvailableTools();
-        console.log(`🔧 Registering ${tools.length} tools:`, tools.map(t => t.name));
-
-        socket.send(JSON.stringify({
-          type: 'register',
-          tools: tools
-        }));
-
-        // Setup heartbeat for persistent connections
-        if (!this.isServiceWorker) {
-          this.setupHeartbeat();
-        }
-      };
+    return new Promise((resolve, reject) => {
+      const fail = (error) => { clearTimeout(timer); reject(error); };
+      const timer = setTimeout(() => {
+        if (this.mcpSocket === socket) this.closeSocket();
+        fail(new Error("Сервер claude-for-arc не ответил"));
+      }, 8000);
 
       socket.onmessage = async (event) => {
         if (this.mcpSocket !== socket) return;
-        const message = JSON.parse(event.data);
-        await handleMCPRequest(message);
+        let message;
+        try {
+          message = JSON.parse(event.data);
+        } catch {
+          return;
+        }
+
+        if (!this.authenticated) {
+          if (message.type === "challenge" && /^[0-9a-f]{64}$/.test(message.nonce || "") && !serverNonce) {
+            serverNonce = message.nonce;
+            socket.send(JSON.stringify({
+              type: "auth",
+              role: "extension",
+              nonce: clientNonce,
+              mac: await hmacHex(token, "client", serverNonce, clientNonce),
+            }));
+          } else if (message.type === "auth_ok" && serverNonce) {
+            const expected = await hmacHex(token, "server", clientNonce, serverNonce);
+            if (!constantTimeEqual(message.mac, expected)) {
+              // Something answered on the port without knowing the token.
+              console.warn("claude-for-arc: server failed to prove the token; disconnecting");
+              this.closeSocket();
+              this.setState("badkey");
+              fail(new Error("Сервер на порту не знает ключ"));
+              return;
+            }
+            this.authenticated = true;
+            clearTimeout(timer);
+            this.setState("connected");
+            this.register();
+            this.startKeepalive();
+            resolve();
+          } else if (message.type === "auth_failed") {
+            this.setState("badkey");
+            fail(new Error("Сервер отклонил ключ: проверьте, что он скопирован целиком"));
+          }
+          return; // nothing else is accepted before both sides are verified
+        }
+
+        if (message.type === "pong") return;
+        if (typeof message.id === "string" && typeof message.method === "string") {
+          await handleMCPRequest(message);
+        }
       };
 
       socket.onclose = (event) => {
         if (this.mcpSocket !== socket) return;
-        console.log(`❌ Disconnected from MCP server (code: ${event.code}, reason: ${event.reason})`);
-        this.clearHeartbeat(); // Clear heartbeat on disconnect
-        this.reconnectAttempts++;
-
-        // Check if this was a normal closure or abnormal
-        if (event.code !== 1000 && event.code !== 1001) {
-          console.log('🔄 Abnormal WebSocket closure, will attempt reconnection');
-
-          if (!this.isServiceWorker) {
-            // Firefox: Attempt to reconnect
-            this.scheduleReconnect();
-          }
-          // Chrome: Will reconnect on next message
-        } else {
-          console.log('🔄 Normal WebSocket closure');
-        }
+        this.mcpSocket = null;
+        this.authenticated = false;
+        this.stopKeepalive();
+        if (this.state !== "badkey" && this.state !== "nokey") this.setState("offline");
+        fail(new Error(`Соединение закрыто (${event.code})`));
       };
 
-      // No attempt counting here: onclose always follows onerror for a failed
-      // socket, so incrementing in both halved the effective retry budget.
-      socket.onerror = (error) => {
-        if (this.mcpSocket !== socket) return;
-        console.log('⚠️ MCP WebSocket error:', error);
-      };
-
-      await this.waitForSocketOpen(socket);
-
-    } catch (error) {
-      console.error('Connection failed:', error);
-      if (!this.isServiceWorker) {
-        this.scheduleReconnect();
-      }
-      // Rethrow so ensureConnection() fails before handleMCPRequest runs the
-      // tool. Swallowing here meant tab_close/element_click still executed
-      // against the browser while the reply was dropped, and the model saw
-      // only "Tool call timeout" — then reasonably retried the side effect.
-      throw error;
-    }
+      socket.onerror = () => {};
+    });
   }
 
-  async discoverServerPorts() {
-    // Try common HTTP ports to find the server. A custom port from the popup
-    // goes first, for a server started on a port outside this list.
-    const commonPorts = [5556, 5557, 5558, 3001, 6001, 6002, 6003];
-    const customPort = await getCustomHttpPort();
-    const ports = customPort
-      ? [customPort, ...commonPorts.filter((port) => port !== customPort)]
-      : commonPorts;
-    
-    for (const httpPort of ports) {
-      try {
-        const response = await fetch(`http://localhost:${httpPort}/ports`);
-        if (response.ok) {
-          const portInfo = await response.json();
-          console.log('🔍 Discovered server ports:', portInfo);
-          lastKnownPorts = { websocket: portInfo.websocket, http: portInfo.http };
-          MCP_SERVER_URL = portInfo.websocketUrl;
-          return portInfo;
-        }
-      } catch (error) {
-        // Port not available or not OpenDia server, continue searching
-      }
-    }
-    
-    console.log('⚠️ Port discovery failed, using defaults');
-    return null;
+  register() {
+    const tools = guard.decorateTools(getAvailableTools(), guard.getSettings());
+    this.mcpSocket.send(JSON.stringify({ type: "register", tools }));
   }
 
-  setupHeartbeat() {
-    // Only maintain heartbeat in persistent background pages
-    this.clearHeartbeat();
-    this.heartbeatInterval = setInterval(() => {
+  // Re-advertise tools after a settings change (history toggle, scope).
+  reregister() {
+    if (this.authenticated && this.mcpSocket?.readyState === WebSocket.OPEN) this.register();
+  }
+
+  // Traffic every 20s keeps the MV3 service worker (and thus the socket) alive.
+  startKeepalive() {
+    this.stopKeepalive();
+    this.keepalive = setInterval(() => {
       if (this.mcpSocket?.readyState === WebSocket.OPEN) {
-        this.mcpSocket.send(JSON.stringify({ type: 'ping', timestamp: Date.now() }));
-      } else if (this.mcpSocket?.readyState === WebSocket.CLOSED) {
-        console.log('🔄 WebSocket closed, attempting reconnection...');
-        // Background retry: the reconnect loop owns recovery, so a failure
-        // here is expected and must not become an unhandled rejection.
-        this.connect().catch(() => {});
+        this.mcpSocket.send(JSON.stringify({ type: "ping", timestamp: Date.now() }));
       }
-    }, 15000); // More frequent heartbeat for better reliability
+    }, KEEPALIVE_MS);
   }
 
-  clearHeartbeat() {
-    if (this.heartbeatInterval) {
-      clearInterval(this.heartbeatInterval);
-      this.heartbeatInterval = null;
+  stopKeepalive() {
+    clearInterval(this.keepalive);
+    this.keepalive = null;
+  }
+
+  closeSocket() {
+    const socket = this.mcpSocket;
+    this.mcpSocket = null;
+    this.authenticated = false;
+    this.stopKeepalive();
+    if (socket) {
+      try { socket.close(1000, "client closing"); } catch {}
     }
-  }
-
-  // One-shot, not an interval: a fixed period fires again while the previous
-  // attempt is still in port discovery (7 sequential un-timed fetches), which
-  // overwrites this.mcpSocket and orphans the pending socket. Failure re-arms
-  // via createConnection's catch and onclose, so nothing is lost.
-  scheduleReconnect() {
-    this.clearReconnectTimer();
-
-    if (this.reconnectAttempts >= 10) {
-      console.log('❌ Maximum reconnection attempts reached');
-      return;
-    }
-
-    // Exponential backoff for reconnection attempts
-    const backoffTime = Math.min(5000 * Math.pow(2, this.reconnectAttempts), 30000);
-    console.log(`🔄 Scheduling reconnection in ${backoffTime}ms (attempt ${this.reconnectAttempts})`);
-
-    this.reconnectTimer = setTimeout(() => {
-      this.connect().catch(() => {});
-    }, backoffTime);
-  }
-
-  clearReconnectTimer() {
-    if (this.reconnectTimer) {
-      clearTimeout(this.reconnectTimer);
-      this.reconnectTimer = null;
-    }
-  }
-
-  async ensureConnection() {
-    await this.connect();
-    return this.mcpSocket;
   }
 
   send(message) {
-    if (!this.mcpSocket || this.mcpSocket.readyState !== WebSocket.OPEN) {
-      // Dropping the frame here left the server's pending call to expire as a
-      // generic 30s "Tool call timeout", hiding the real cause.
+    if (!this.authenticated || !this.mcpSocket || this.mcpSocket.readyState !== WebSocket.OPEN) {
       throw new Error(`WebSocket not connected; dropped response for id=${message?.id}`);
     }
     this.mcpSocket.send(JSON.stringify(message));
   }
 
   getStatus() {
-    return {
-      connected: this.mcpSocket && this.mcpSocket.readyState === WebSocket.OPEN,
-      browserInfo: browserInfo,
-      connectionType: this.isServiceWorker ? 'temporary' : 'persistent'
-    };
+    return { state: this.state, connected: this.authenticated };
   }
 }
 
@@ -1039,17 +967,20 @@ function getAvailableTools() {
 
 // Handle MCP requests with enhanced automation tools
 async function handleMCPRequest(message) {
-  const { id, method, params } = message;
+  const { id, method } = message;
+  let host = "";
 
   try {
-    // Ensure connection for Chrome service workers
-    await connectionManager.ensureConnection();
-
-    // Safety Mode check: Block write/edit tools if safety mode is enabled
-    if (safetyModeEnabled && WRITE_EDIT_TOOLS.includes(method)) {
-      const targetInfo = params.tab_id ? `tab ${params.tab_id}` : 'the current page';
-      throw new Error(`🛡️ Safety Mode is enabled. This tool (${method}) is blocked to prevent modifications to ${targetInfo}. To disable Safety Mode, open the OpenDia extension popup and toggle off "Safety Mode".`);
+    // claude-for-arc policy: scope, read-only, pause, blocklist, history gate.
+    let checked;
+    try {
+      checked = await guard.checkCall(method, message.params);
+    } catch (error) {
+      if (guard.isRefusal(error)) throw new Error(`claude-for-arc: ${error.message}`);
+      throw error;
     }
+    const params = checked.params;
+    host = checked.host;
 
     let result;
 
@@ -1068,7 +999,8 @@ async function handleMCPRequest(message) {
         result = await sendToContentScript('element_fill', params, params.tab_id);
         break;
       case "page_navigate":
-        result = await navigateToUrl(params.url, params.wait_for, params.timeout);
+        result = await navigateToUrl(params.url, params.wait_for, params.timeout, params.tab_id, params.open_new_tab);
+        await guard.rememberCreatedTabs(params.open_new_tab ? result : null);
         break;
       case "page_wait_for":
         result = await sendToContentScript('wait_for', params, params.tab_id);
@@ -1077,12 +1009,24 @@ async function handleMCPRequest(message) {
       // Tab management tools
       case "tab_create":
         result = await createTab(params);
+        await guard.rememberCreatedTabs(result);
         break;
       case "tab_close":
         result = await closeTabs(params);
         break;
       case "tab_list":
         result = await listTabs(params);
+        if (checked.filterTabs) {
+          const hiddenCount = result.tabs.filter((tab) => !guard.isAgentTab(tab.id)).length;
+          result.tabs = result.tabs.filter((tab) => guard.isAgentTab(tab.id));
+          result.count = result.tabs.length;
+          result.summary = {
+            total_tabs: result.tabs.length,
+            active_tab: result.tabs.find((tab) => tab.active)?.id || null,
+            hidden_user_tabs: hiddenCount,
+            note: "claude-for-arc: only tabs opened by the agent are listed; the user's own tabs are hidden.",
+          };
+        }
         break;
       case "tab_switch":
         result = await switchToTab(params.tab_id);
@@ -1118,12 +1062,14 @@ async function handleMCPRequest(message) {
         throw new Error(`Unknown method: ${method}`);
     }
 
+    guard.logCall({ tool: method, host, ok: true });
     // Send success response
     connectionManager.send({
       id,
       result,
     });
   } catch (error) {
+    guard.logCall({ tool: method, host, ok: false, error: String(error.message).slice(0, 200) });
     // Send error response. Guarded because send() now throws when the socket
     // is down, and this is the last handler — an escape here would be an
     // unhandled rejection that loses the original error entirely.
@@ -1185,8 +1131,12 @@ async function sendToContentScript(action, data, targetTabId = null) {
   });
 }
 
-async function navigateToUrl(url, waitFor, timeout = 10000) {
-  const activeTab = await resolveTargetTab();
+async function navigateToUrl(url, waitFor, timeout = 10000, tabId = null, openNewTab = false) {
+  if (openNewTab) {
+    const created = await createSingleTab(url, true, waitFor, timeout);
+    return { ...created, opened_new_tab: true };
+  }
+  const activeTab = await resolveTargetTab(tabId);
 
   await browser.tabs.update(activeTab.id, { url });
   
@@ -1998,47 +1948,46 @@ function getSelectionFunction() {
   };
 }
 
-// Initialize connection when extension loads (with delay for server startup)
-setTimeout(() => {
-  connectionManager.connect().catch((error) => {
-    console.log('Initial connection attempt failed:', error.message);
-  });
-}, 1000);
+// ---------------------------------------------------------------------------
+// Startup, reconnection and popup messages
 
-// Handle messages from popup
+function tryConnect() {
+  connectionManager.connect().catch((error) => console.log("claude-for-arc:", error.message));
+}
+
+// MV3 workers sleep; an alarm wakes this one to reconnect when the server
+// (started by Claude) comes up later or restarts.
+chrome.alarms.create(RECONNECT_ALARM, { periodInMinutes: 0.5 });
+chrome.alarms.onAlarm.addListener((alarm) => {
+  if (alarm.name === RECONNECT_ALARM && !connectionManager.getStatus().connected) tryConnect();
+});
+chrome.runtime.onStartup.addListener(tryConnect);
+chrome.runtime.onInstalled.addListener(tryConnect);
+
+chrome.storage.onChanged.addListener((changes, area) => {
+  if (area !== "local") return;
+  if (changes.token || changes.port) {
+    connectionManager.closeSocket();
+    tryConnect();
+  } else if (changes.allowHistory || changes.scope) {
+    connectionManager.reregister();
+  }
+  if (changes.paused) guard.setBadge(connectionManager.getStatus().state);
+});
+
+// Only this extension's own pages (the popup) may ask for status; content
+// scripts run inside web pages and are ignored.
 browser.runtime.onMessage.addListener((request, sender, sendResponse) => {
+  if (sender.id !== chrome.runtime.id || sender.tab) return false;
   if (request.action === "getStatus") {
-    sendResponse(connectionManager.getStatus());
-  } else if (request.action === "getToolCount") {
-    const tools = getAvailableTools();
-    sendResponse({
-      toolCount: tools.length,
-      tools: tools.map(t => t.name)
-    });
+    sendResponse({ ...connectionManager.getStatus(), agentTabs: guard.agentTabIds().length });
   } else if (request.action === "reconnect") {
-    // Answer after the socket opens, not before, so the popup reports the
-    // real outcome rather than always looking successful.
     connectionManager.connect()
       .then(() => sendResponse({ success: true }))
       .catch((error) => sendResponse({ success: false, error: error.message }));
     return true;
-  } else if (request.action === "getPorts") {
-    sendResponse({
-      current: lastKnownPorts,
-      websocketUrl: MCP_SERVER_URL
-    });
-  } else if (request.action === "setSafetyMode") {
-    safetyModeEnabled = request.enabled;
-    console.log(`🛡️ Safety Mode ${safetyModeEnabled ? 'ENABLED' : 'DISABLED'}`);
-    sendResponse({ success: true });
-  } else if (request.action === "setCustomHttpPort") {
-    // Force discovery on the next connect so the new port is probed, and try
-    // now if nothing is connected instead of waiting out the backoff.
-    MCP_SERVER_URL = 'ws://localhost:5555';
-    if (!connectionManager.getStatus().connected) {
-      connectionManager.connect().catch(() => {});
-    }
-    sendResponse({ success: true });
   }
-  return true; // Keep the message channel open
+  return false;
 });
+
+tryConnect();
