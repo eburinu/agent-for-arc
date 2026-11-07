@@ -1,6 +1,6 @@
 {
   "name": "claude-for-arc-server",
-  "version": "0.3.6",
+  "version": "0.3.7",
   "private": true,
   "description": "MCP server that lets Claude drive the Arc browser through the claude-for-arc extension. Based on OpenDia (MIT).",
   "main": "server.js",

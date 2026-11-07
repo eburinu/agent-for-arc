@@ -107,6 +107,15 @@ r = await call("element_click", { element_id: counter, tab_id: tabId, click_type
 r = await call("page_wait_for", { condition_type: "text_present", text: "Нажато: 2", timeout: 3000, tab_id: tabId });
 check("two clicks registered on the page", !r.err, r.text);
 
+const pressButton = idFor((await call("page_analyze", { intent_hint: "отправить сообщение", tab_id: tabId })).text, "Отправить сообщение");
+check("found the press-counting button", !!pressButton, pressButton);
+r = await call("element_click", { element_id: pressButton, tab_id: tabId });
+await sleep(300);
+r = await call("page_wait_for", { condition_type: "text_present", text: "Отправлено раз: 1", timeout: 3000, tab_id: tabId });
+check("one click = one press (no double send)", !r.err, r.text);
+r = await call("element_get_state", { element_id: pressButton, tab_id: tabId });
+check("still exactly one press after the click", !/Отправлено раз: [2-9]/.test(r.text), r.text);
+
 if (disabled) {
   r = await call("element_click", { element_id: disabled, tab_id: tabId });
   check("click on a disabled button is reported, not faked", r.err && /выключен/.test(r.text), r.text);

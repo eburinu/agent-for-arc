@@ -42,6 +42,22 @@
 
     <button id="counter" type="button" onclick="window.clicks++; this.textContent = 'Нажато: ' + window.clicks">Нажми меня</button>
     <button id="disabled" type="button" disabled>Выключенная кнопка</button>
+    <!-- Counts presses like press-handling UI libraries: a press on pointerup,
+         and a click with no pointer behind it as a separate press. A real
+         mouse click counts once. -->
+    <button id="press" type="button">Отправить сообщение</button>
+    <script>
+      window.presses = 0;
+      (() => {
+        const b = document.getElementById("press");
+        const count = () => { window.presses++; b.textContent = "Отправлено раз: " + window.presses; };
+        // A real mouse click: one press on pointerup, its click has detail 1.
+        b.addEventListener("pointerup", (e) => { if (e.button === 0) count(); });
+        // A click with detail 0 has no pointer behind it (keyboard, screen
+        // reader, element.click()): a press of its own.
+        b.addEventListener("click", (e) => { if (e.detail === 0) count(); });
+      })();
+    </script>
 
     <p><a id="link-a" href="#section-a">Ссылка на раздел A</a> · <a id="link-ext" href="https://example.com/">Внешняя ссылка</a></p>
 

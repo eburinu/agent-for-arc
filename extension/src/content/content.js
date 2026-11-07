@@ -1099,28 +1099,43 @@ class BrowserAutomation {
     element.scrollIntoView({ behavior: "smooth", block: "center" });
     await new Promise((resolve) => setTimeout(resolve, 200));
 
-    // Many widgets (menus, dropdowns) react to pointer/mouse down rather than
-    // click, so send the whole sequence a real click produces.
+    // Send exactly what one real mouse click produces. Widgets (menus, and
+    // press handlers like React Aria's) act on pointer events and then skip
+    // the click that follows; a click with detail 0 (element.click()) or
+    // pointer events without pointerType look like a second, keyboard press,
+    // and a send button then sends twice.
     const rect = element.getBoundingClientRect();
-    const point = {
+    const button = click_type === "right" ? 2 : 0;
+    const base = {
       bubbles: true,
       cancelable: true,
+      composed: true,
+      view: window,
       clientX: rect.left + rect.width / 2,
       clientY: rect.top + rect.height / 2,
-      button: click_type === "right" ? 2 : 0,
+      button,
     };
-    element.dispatchEvent(new PointerEvent("pointerdown", point));
-    element.dispatchEvent(new MouseEvent("mousedown", point));
-    element.dispatchEvent(new PointerEvent("pointerup", point));
-    element.dispatchEvent(new MouseEvent("mouseup", point));
+    const pointer = { ...base, pointerId: 1, pointerType: "mouse", isPrimary: true, width: 1, height: 1 };
+    const press = (detail) => {
+      element.dispatchEvent(new PointerEvent("pointerdown", { ...pointer, buttons: 1 << (button === 2 ? 1 : 0), pressure: 0.5 }));
+      element.dispatchEvent(new MouseEvent("mousedown", { ...base, buttons: 1 << (button === 2 ? 1 : 0), detail }));
+      if (typeof element.focus === "function" && button === 0) element.focus({ preventScroll: true });
+      element.dispatchEvent(new PointerEvent("pointerup", { ...pointer, buttons: 0, pressure: 0 }));
+      element.dispatchEvent(new MouseEvent("mouseup", { ...base, buttons: 0, detail }));
+    };
 
+    element.dispatchEvent(new PointerEvent("pointerover", pointer));
+    element.dispatchEvent(new MouseEvent("mouseover", base));
     if (click_type === "right") {
-      element.dispatchEvent(new MouseEvent("contextmenu", point));
+      press(1);
+      element.dispatchEvent(new MouseEvent("contextmenu", { ...base, detail: 1 }));
     } else {
-      element.click();
+      press(1);
+      element.dispatchEvent(new MouseEvent("click", { ...base, detail: 1 }));
       if (click_type === "double") {
-        element.click();
-        element.dispatchEvent(new MouseEvent("dblclick", point));
+        press(2);
+        element.dispatchEvent(new MouseEvent("click", { ...base, detail: 2 }));
+        element.dispatchEvent(new MouseEvent("dblclick", { ...base, detail: 2 }));
       }
     }
 
