@@ -288,7 +288,7 @@ export async function logCall(entry) {
 }
 
 const BADGES = {
-  connected: { text: "ON", color: "#16a34a", title: "badgeConnected" },
+  connected: { text: "", color: "#16a34a", title: "badgeConnected" },
   paused: { text: "II", color: "#6b7280", title: "badgePaused" },
   nokey: { text: "!", color: "#dc2626", title: "badgeNokey" },
   badkey: { text: "!", color: "#dc2626", title: "badgeBadkey" },
