@@ -13,7 +13,7 @@ STAGE="$(mktemp -d)/$NAME"
 cd "$ROOT"
 [ -z "$(git status --porcelain)" ] || { echo "Рабочая копия не чистая — сначала закоммитьте изменения." >&2; exit 1; }
 
-node --test --test-concurrency=1 server/test/ tests/ >/dev/null || { echo "Тесты не прошли." >&2; exit 1; }
+node --test --test-concurrency=1 server/test/ tests/ >/dev/null && node tests/worker.e2e.mjs >/dev/null 2>&1 || { echo "Тесты не прошли." >&2; exit 1; }
 
 mkdir -p "$STAGE/server" "$STAGE/scripts" "$OUT"
 git archive HEAD extension | tar -x -C "$STAGE"
