@@ -62,6 +62,40 @@ function isSensitiveField(element) {
   return SENSITIVE_NAME.test(label);
 }
 
+// claude-for-arc: readable text of an element. textContent (used upstream)
+// includes the source of <style> and <script> tags, which on heavy sites is
+// most of the page; innerText is what the user actually sees. Capped so one
+// page cannot flood the conversation.
+const MAX_TEXT_CHARS = 40000;
+
+function readableText(element, maxChars = MAX_TEXT_CHARS) {
+  if (!element) return "";
+  let text = typeof element.innerText === "string" ? element.innerText : "";
+  if (!text.trim()) {
+    // Not rendered (e.g. display:none): fall back to text nodes outside
+    // style/script/template/svg.
+    const walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT, {
+      acceptNode(node) {
+        return node.parentElement?.closest("style, script, noscript, template, svg")
+          ? NodeFilter.FILTER_REJECT
+          : NodeFilter.FILTER_ACCEPT;
+      },
+    });
+    const parts = [];
+    while (walker.nextNode()) parts.push(walker.currentNode.nodeValue);
+    text = parts.join(" ");
+  }
+  text = text
+    .replace(/[ \t\u00a0]+/g, " ")
+    .replace(/ *\n */g, "\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+  if (text.length > maxChars) {
+    text = text.slice(0, maxChars) + `\n… [claude-for-arc: обрезано, всего ${text.length} символов]`;
+  }
+  return text;
+}
+
 // Upper bound per element registry, so a long-lived tab can't grow it forever.
 const MAX_REGISTRY_ENTRIES = 1000;
 
@@ -444,7 +478,7 @@ class BrowserAutomation {
     phase = "discover",
     focus_areas,
     element_ids,
-    max_results = 5,
+    max_results, // each phase applies its own default (discover 5, detailed 10)
   }) {
     this.pruneRegistries();
 
@@ -455,10 +489,10 @@ class BrowserAutomation {
         intent_hint,
         focus_areas,
         element_ids,
-        max_results,
+        max_results: max_results ?? 10,
       });
     }
-    return await this.quickDiscovery({ intent_hint, max_results });
+    return await this.quickDiscovery({ intent_hint, max_results: max_results ?? 5 });
   }
 
   async quickDiscovery({ intent_hint, max_results = 5 }) {
@@ -469,7 +503,7 @@ class BrowserAutomation {
     const viewportElements = this.countViewportElements();
 
     // Use default max results limit
-    max_results = Math.min(max_results, 5);
+    max_results = Math.min(max_results, 10); // claude-for-arc: was 5
 
     // Try to find obvious matches using enhanced patterns
     let quickMatches = [];
@@ -502,7 +536,7 @@ class BrowserAutomation {
 
     // If no pattern matches, do a quick viewport scan
     if (quickMatches.length === 0) {
-      quickMatches = await this.quickViewportScan(intent_hint, 3);
+      quickMatches = await this.quickViewportScan(intent_hint, max_results);
       usedMethod = "viewport_scan";
     }
 
@@ -590,7 +624,7 @@ class BrowserAutomation {
     const startTime = performance.now();
 
     // Use default max results limit  
-    max_results = Math.min(max_results, 7); // Allow slightly more for detailed analysis
+    max_results = Math.min(max_results, 30); // claude-for-arc: was capped at 7
 
     let elements = [];
     let method = "detailed_analysis";
@@ -686,8 +720,8 @@ class BrowserAutomation {
     );
     const title = document
       .querySelector("h1, .article-title, .post-title")
-      ?.textContent?.trim();
-    const content = article?.textContent?.trim() || this.extractMainContent();
+      ?.innerText?.trim();
+    const content = readableText(article) || this.extractMainContent();
 
 
     return {
@@ -706,7 +740,7 @@ class BrowserAutomation {
     let maxTextLength = 0;
 
     for (const candidate of candidates) {
-      const textLength = candidate.textContent.trim().length;
+      const textLength = readableText(candidate, Infinity).length;
       if (textLength > maxTextLength) {
         maxTextLength = textLength;
         bestCandidate = candidate;
@@ -714,7 +748,7 @@ class BrowserAutomation {
     }
 
     return (
-      bestCandidate?.textContent?.trim() || document.body.textContent.trim()
+      readableText(bestCandidate) || readableText(document.body)
     );
   }
 
@@ -864,24 +898,24 @@ class BrowserAutomation {
       'h1, h2, h3, .title, .headline, [data-testid*="title"]',
     ];
     for (const selector of titleSelectors) {
-      const title = element.querySelector(selector)?.textContent?.trim();
+      const title = readableText(element.querySelector(selector));
       if (title) {
         return summarize ? title.substring(0, 100) : title;
       }
     }
-    const fallbackTitle = element.textContent?.trim() || "No title";
+    const fallbackTitle = readableText(element) || "No title";
     return summarize ? fallbackTitle.substring(0, 50) : fallbackTitle;
   }
 
   extractResultSummary(element, summarize = true) {
     const summarySelectors = [".summary, .description, .snippet, .excerpt"];
     for (const selector of summarySelectors) {
-      const summary = element.querySelector(selector)?.textContent?.trim();
+      const summary = readableText(element.querySelector(selector));
       if (summary) {
         return summarize ? summary.substring(0, 200) : summary;
       }
     }
-    const fallbackSummary = element.textContent?.trim() || "";
+    const fallbackSummary = readableText(element);
     return summarize ? fallbackSummary.substring(0, 150) : fallbackSummary;
   }
 
@@ -921,13 +955,13 @@ class BrowserAutomation {
     ];
 
     for (const selector of textSelectors) {
-      const text = element.querySelector(selector)?.textContent?.trim();
+      const text = readableText(element.querySelector(selector));
       if (text) {
         return summarize ? text.substring(0, 280) : text;
       }
     }
 
-    const fallbackText = element.textContent?.trim() || "";
+    const fallbackText = readableText(element);
     return summarize ? fallbackText.substring(0, 280) : fallbackText;
   }
 
@@ -1055,15 +1089,39 @@ class BrowserAutomation {
       throw new Error(`Element not found: ${element_id}`);
     }
 
+    // claude-for-arc: a disabled control ignores clicks; say so instead of
+    // reporting a success that did nothing.
+    if (this.isElementDisabled(element)) {
+      throw new Error(`Элемент «${this.getElementName(element)}» выключен (disabled) — клик ничего не сделает`);
+    }
+
     // Scroll element into view
     element.scrollIntoView({ behavior: "smooth", block: "center" });
     await new Promise((resolve) => setTimeout(resolve, 200));
 
-    // Click the element
+    // Many widgets (menus, dropdowns) react to pointer/mouse down rather than
+    // click, so send the whole sequence a real click produces.
+    const rect = element.getBoundingClientRect();
+    const point = {
+      bubbles: true,
+      cancelable: true,
+      clientX: rect.left + rect.width / 2,
+      clientY: rect.top + rect.height / 2,
+      button: click_type === "right" ? 2 : 0,
+    };
+    element.dispatchEvent(new PointerEvent("pointerdown", point));
+    element.dispatchEvent(new MouseEvent("mousedown", point));
+    element.dispatchEvent(new PointerEvent("pointerup", point));
+    element.dispatchEvent(new MouseEvent("mouseup", point));
+
     if (click_type === "right") {
-      element.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true }));
+      element.dispatchEvent(new MouseEvent("contextmenu", point));
     } else {
       element.click();
+      if (click_type === "double") {
+        element.click();
+        element.dispatchEvent(new MouseEvent("dblclick", point));
+      }
     }
 
     await new Promise((resolve) => setTimeout(resolve, wait_after));
@@ -1396,19 +1454,53 @@ class BrowserAutomation {
     return "element";
   }
 
+  // claude-for-arc: score by how many words of the hint the element mentions
+  // (name, placeholder, label, id) plus whether its kind matches words like
+  // "кнопка"/"button" or "ссылка"/"link". Upstream only matched the whole hint
+  // as one substring, so multi-word hints left every element tied at 0.5.
   calculateConfidence(element, intentHint) {
-    let confidence = 0.5;
+    const hint = String(intentHint || "").toLowerCase();
+    const words = hint.split(/[^\p{L}\p{N}]+/u).filter((w) => w.length >= 2);
+    const kind = this.elementKind(element);
+    const typeWords = {
+      button: ["button", "кнопк", "click", "нажм", "нажат", "submit", "отправ", "press"],
+      link: ["link", "ссылк", "navigation", "nav", "перейти", "url"],
+      input: ["input", "field", "поле", "поля", "fill", "заполн", "form", "форм", "search", "поиск", "textbox", "type", "ввод", "введ"],
+    };
+    const isTypeWord = (w) => Object.values(typeWords).some((list) => list.some((t) => w.startsWith(t)));
+    const contentWords = words.filter((w) => !isTypeWord(w));
 
-    const text = this.getElementName(element).toLowerCase();
-    const hint = intentHint.toLowerCase();
+    const haystack = [
+      this.getElementName(element),
+      element.getAttribute("placeholder"),
+      element.getAttribute("aria-label"),
+      element.getAttribute("title"),
+      element.getAttribute("name"),
+      element.id,
+      element.getAttribute("href"),
+    ].filter(Boolean).join(" ").toLowerCase();
 
-    if (text.includes(hint)) confidence += 0.3;
-    if (element.getAttribute("data-testid")) confidence += 0.2;
-    if (element.getAttribute("aria-label")) confidence += 0.1;
-
-    return Math.min(confidence, 1.0);
+    let confidence = 0.3;
+    if (contentWords.length) {
+      const matched = contentWords.filter((w) => haystack.includes(w)).length;
+      confidence += 0.5 * (matched / contentWords.length);
+    }
+    if (kind && words.some((w) => typeWords[kind].some((t) => w.startsWith(t)))) confidence += 0.2;
+    if (hint && haystack.includes(hint)) confidence += 0.1;
+    if (element.getAttribute("data-testid")) confidence += 0.05;
+    if (element.disabled) confidence -= 0.2;
+    return Math.max(0, Math.min(confidence, 1.0));
   }
 
+  elementKind(element) {
+    const tag = element.tagName;
+    const role = element.getAttribute("role");
+    const type = (element.getAttribute("type") || "").toLowerCase();
+    if (tag === "BUTTON" || role === "button" || (tag === "INPUT" && ["submit", "button", "reset"].includes(type))) return "button";
+    if (tag === "A" || role === "link") return "link";
+    if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" || element.isContentEditable || role === "textbox" || role === "searchbox") return "input";
+    return null;
+  }
 
   // Two-phase utility methods
   compressElement(element, isQuick = false) {
@@ -1554,7 +1646,7 @@ class BrowserAutomation {
     );
     const visibleElements = Array.from(candidates)
       .filter((el) => this.isLikelyVisible(el))
-      .slice(0, 10); // Limit scan to first 10 visible elements
+      .slice(0, 300); // claude-for-arc: was the first 10 visible elements
 
     const scoredElements = visibleElements.map((element) => {
       const confidence = this.calculateConfidence(element, intent_hint);
@@ -1673,7 +1765,7 @@ class BrowserAutomation {
 
     const elements = Array.from(relevantElements)
       .filter((el) => this.isLikelyVisible(el))
-      .slice(0, 30) // Analyze more elements than before
+      .slice(0, 600) // claude-for-arc: whole page, not just the first 30
       .map((element) => {
         const elementId = this.registerElement(element);
         return {

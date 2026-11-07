@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <title>claude-for-arc test page</title>
+  <style>
+    /* CSS_MARKER: this stylesheet must never appear in extracted text */
+    body { font-family: sans-serif; margin: 2rem; }
+    .tall { height: 3000px; background: linear-gradient(#fff, #eef); }
+    #hidden { display: none; }
+  </style>
+  <script>
+    // SCRIPT_MARKER: this script source must never appear in extracted text
+    window.clicks = 0;
+  </script>
+</head>
+<body>
+  <main>
+    <h1>Тестовая страница</h1>
+    <article>
+      <p>VISIBLE_MARKER: это видимый текст статьи, его извлечение обязано вернуть.</p>
+      <p>Второй абзац для проверки переносов строк.</p>
+    </article>
+
+    <form id="form" onsubmit="event.preventDefault(); document.getElementById('result').textContent = 'SUBMITTED:' + document.getElementById('name').value;">
+      <label for="name">Имя</label>
+      <input id="name" name="name" type="text" placeholder="Ваше имя">
+
+      <label for="pass">Пароль</label>
+      <input id="pass" name="password" type="password" placeholder="Пароль" value="SECRET_VALUE">
+
+      <label for="card">Номер карты</label>
+      <input id="card" name="cardNumber" autocomplete="cc-number" placeholder="Номер карты">
+
+      <label for="comment">Комментарий</label>
+      <textarea id="comment" name="comment" placeholder="Комментарий"></textarea>
+
+      <button id="submit" type="submit">Отправить форму</button>
+    </form>
+
+    <p id="result">NOT_SUBMITTED</p>
+
+    <button id="counter" type="button" onclick="window.clicks++; this.textContent = 'Нажато: ' + window.clicks">Нажми меня</button>
+    <button id="disabled" type="button" disabled>Выключенная кнопка</button>
+
+    <p><a id="link-a" href="#section-a">Ссылка на раздел A</a> · <a id="link-ext" href="https://example.com/">Внешняя ссылка</a></p>
+
+    <div id="hidden">HIDDEN_MARKER</div>
+    <div id="late"></div>
+    <script>
+      setTimeout(() => { document.getElementById('late').textContent = 'LATE_MARKER'; }, 1500);
+    </script>
+
+    <div class="tall"></div>
+    <h2 id="section-a">Раздел A</h2>
+    <p>BOTTOM_MARKER: конец страницы.</p>
+  </main>
+</body>
+</html>

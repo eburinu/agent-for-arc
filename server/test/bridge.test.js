@@ -32,7 +32,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 function startServer() {
   const child = spawn(process.execPath, [SERVER], {
-    env: { ...process.env, CFA_DATA_DIR: DATA_DIR, CFA_PORT: String(PORT) },
+    env: { ...process.env, CFA_DATA_DIR: DATA_DIR, CFA_PORT: String(PORT), CFA_EXTENSION_WAIT_MS: "300" },
     stdio: ["pipe", "pipe", "pipe"],
   });
   children.push(child);
@@ -150,21 +150,39 @@ test("refuses a wrong token, foreign origins and unauthenticated roles", async (
   server.child.kill();
 });
 
-test("a newer session takes over the port; the older one goes to standby", async () => {
+test("a session that only starts up waits; the one that calls a tool takes the browser", async () => {
   const older = startServer();
   await older.waitFor("Listening on");
   const newer = startServer();
+  await newer.waitFor("standby until a tool is called");
+
+  // The idle newer session must not have taken anything.
+  await sleep(500);
+  assert.ok(!older.stderr().includes("moving to standby"));
+
+  // Its first tool call takes the port over (no extension here, so the call
+  // itself still reports that the extension is not connected).
+  const call = await newer.rpc("tools/call", { name: "tab_list", arguments: {} });
+  assert.equal(call.result.isError, true);
   await newer.waitFor("Took over");
   await older.waitFor("moving to standby");
 
-  const call = await older.rpc("tools/call", { name: "tab_list", arguments: {} });
-  assert.equal(call.result.isError, true);
-  assert.match(call.result.content[0].text, /другой сессией/);
-
-  // When the newer session ends, the older one picks the port back up.
-  newer.child.stdin.end();
-  await older.waitFor("Listening on ws://", 20000, 2);
+  // A call in the older session takes it back.
+  await older.rpc("tools/call", { name: "tab_list", arguments: {} });
+  await older.waitFor("Took over");
+  await newer.waitFor("moving to standby");
   older.child.kill();
+  newer.child.kill();
+});
+
+test("when the owner exits, a waiting session picks the port up", async () => {
+  const first = startServer();
+  await first.waitFor("Listening on");
+  const second = startServer();
+  await second.waitFor("standby until a tool is called");
+  first.child.stdin.end();
+  await second.waitFor("Listening on ws://", 10000);
+  second.child.kill();
 });
 
 test("an impostor on the port cannot make the server step aside", async () => {
@@ -173,7 +191,11 @@ test("an impostor on the port cannot make the server step aside", async () => {
   await new Promise((r) => impostor.once("listening", r));
 
   const server = startServer();
-  await server.waitFor("waiting in standby");
+  await server.waitFor("standby until a tool is called");
+  // A tool call tries to take over; the impostor cannot complete the handshake.
+  const call = await server.rpc("tools/call", { name: "tab_list", arguments: {} });
+  assert.equal(call.result.isError, true);
+  await server.waitFor("did not step aside");
   impostor.close();
   await server.waitFor("Listening on ws://", 10000);
   server.child.kill();

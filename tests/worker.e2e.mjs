@@ -18,7 +18,7 @@ const TOKEN = crypto.randomBytes(32).toString("hex");
 fs.writeFileSync(path.join(dataDir, "token"), TOKEN);
 
 // ---- chrome mock
-const listeners = (name) => { const l = []; const o = { addListener: (f) => l.push(f), _l: l }; return o; };
+const listeners = () => { const l = []; return { addListener: (f) => l.push(f), removeListener: (f) => { const i = l.indexOf(f); if (i >= 0) l.splice(i, 1); }, _l: l }; };
 const local = { token: TOKEN, port: PORT }, session = {};
 const storageChanged = listeners();
 const area = (store, name) => ({
@@ -27,22 +27,27 @@ const area = (store, name) => ({
 });
 let nextTab = 100;
 const tabs = new Map([[1, { id: 1, url: "https://user.example/inbox", title: "User tab", active: true, windowId: 1 }]]);
-const tabCreated = listeners(), tabRemoved = listeners();
+const tabCreated = listeners(), tabRemoved = listeners(), tabUpdated = listeners();
+// Pages "load" asynchronously, like in a browser: loading, then complete.
+const emitLoad = (id) => {
+  setTimeout(() => { const t = tabs.get(id); if (t) { t.status = "loading"; tabUpdated._l.forEach((f) => f(id, { status: "loading" })); } }, 20);
+  setTimeout(() => { const t = tabs.get(id); if (t) { t.status = "complete"; tabUpdated._l.forEach((f) => f(id, { status: "complete" })); } }, 80);
+};
 const pageCalls = [];
 globalThis.chrome = {
   storage: { local: area(local, "local"), session: area(session, "session"), onChanged: storageChanged },
   tabs: {
     async get(id) { if (!tabs.has(id)) throw new Error("No tab with id: " + id); return { ...tabs.get(id) }; },
     async query(q) { let all = [...tabs.values()]; if (q.active) all = all.filter((t) => t.active); return all.map((t) => ({ ...t })); },
-    async create(p) { const t = { id: nextTab++, url: p.url || "about:blank", title: "New", active: !!p.active, windowId: 1, status: "complete" }; if (t.active) for (const o of tabs.values()) o.active = false; tabs.set(t.id, t); tabCreated._l.forEach((f) => f({ ...t })); return { ...t }; },
-    async update(id, p) { Object.assign(tabs.get(id), p); return { ...tabs.get(id) }; },
+    async create(p) { const t = { id: nextTab++, url: p.url || "about:blank", title: "New", active: !!p.active, windowId: 1, status: "complete" }; if (t.active) for (const o of tabs.values()) o.active = false; t.status = "loading"; tabs.set(t.id, t); tabCreated._l.forEach((f) => f({ ...t })); emitLoad(t.id); return { ...t }; },
+    async update(id, p) { Object.assign(tabs.get(id), p); if (p.url) emitLoad(id); return { ...tabs.get(id) }; },
     async remove(ids) { for (const id of [].concat(ids)) { tabs.delete(id); tabRemoved._l.forEach((f) => f(id)); } },
     sendMessage(id, msg, cb) {
       pageCalls.push({ id, action: msg.action, data: msg.data });
       const res = msg.action === "ping" ? { success: true } : { success: true, data: { ok: true, action: msg.action } };
       if (cb) setTimeout(() => cb(res), 0); else return Promise.resolve(res);
     },
-    onCreated: tabCreated, onRemoved: tabRemoved,
+    onCreated: tabCreated, onRemoved: tabRemoved, onUpdated: tabUpdated,
   },
   windows: { async update() {} },
   scripting: { async executeScript() { return [{ result: { text: "sel", hasSelection: true } }]; } },
@@ -92,6 +97,10 @@ check("blocklisted host refused", r.err && /запрещённых/.test(r.text)
 r = await call("page_navigate", { url: "https://example.com" });
 check("navigate with no agent tab opens a new tab", !r.err && tabs.size === 2, r.text);
 const agentId = Math.max(...tabs.keys());
+check("tab_create waited for the page to load", tabs.get(agentId).status === "complete", tabs.get(agentId).status);
+
+r = await call("page_navigate", { url: "https://example.org/next" });
+check("navigate returns only after the new page loaded", !r.err && tabs.get(agentId).status === "complete" && tabs.get(agentId).url === "https://example.org/next", JSON.stringify(tabs.get(agentId)) + r.text);
 
 pageCalls.length = 0;
 r = await call("page_analyze", {});

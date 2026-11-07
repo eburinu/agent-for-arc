@@ -61,6 +61,8 @@ class ConnectionManager {
     this.state = "offline"; // offline | connecting | connected | nokey | badkey
     this.keepalive = null;
     this.connecting = null;
+    this.reconnectTimer = null;
+    this.reconnectAttempts = 0;
   }
 
   async connect() {
@@ -127,6 +129,7 @@ class ConnectionManager {
               return;
             }
             this.authenticated = true;
+            this.reconnectAttempts = 0;
             clearTimeout(timer);
             this.setState("connected");
             this.register();
@@ -150,12 +153,26 @@ class ConnectionManager {
         this.mcpSocket = null;
         this.authenticated = false;
         this.stopKeepalive();
-        if (this.state !== "badkey" && this.state !== "nokey") this.setState("offline");
+        if (this.state !== "badkey" && this.state !== "nokey") {
+          this.setState("offline");
+          // A server handing the browser to another session, or restarting,
+          // closes us; come back within seconds instead of waiting for the alarm.
+          this.scheduleReconnect();
+        }
         fail(new Error(`Соединение закрыто (${event.code})`));
       };
 
       socket.onerror = () => {};
     });
+  }
+
+  scheduleReconnect() {
+    clearTimeout(this.reconnectTimer);
+    const delay = Math.min(1000 * 2 ** (this.reconnectAttempts || 0), 15000);
+    this.reconnectAttempts = (this.reconnectAttempts || 0) + 1;
+    this.reconnectTimer = setTimeout(() => {
+      this.connect().catch(() => {});
+    }, delay);
   }
 
   register() {
@@ -1131,6 +1148,41 @@ async function sendToContentScript(action, data, targetTabId = null) {
   });
 }
 
+// claude-for-arc: resolve once a tab has finished loading, so the next tool
+// call sees the new page rather than the one being replaced. With
+// requireLoading, a "complete" is only trusted after a "loading" (the old page
+// is already complete); a same-document #hash change never loads, so that case
+// resolves after 2s without one.
+function waitForTabLoad(tabId, timeout = 15000, { requireLoading = false } = {}) {
+  return new Promise((resolve) => {
+    let seenLoading = !requireLoading;
+    let finished = false;
+    let noLoadTimer = null;
+    const finish = (loaded) => {
+      if (finished) return;
+      finished = true;
+      chrome.tabs.onUpdated.removeListener(onUpdated);
+      clearTimeout(timer);
+      clearTimeout(noLoadTimer);
+      resolve(loaded);
+    };
+    const onUpdated = (id, info) => {
+      if (id !== tabId) return;
+      if (info.status === "loading") seenLoading = true;
+      if (info.status === "complete" && seenLoading) finish(true);
+    };
+    chrome.tabs.onUpdated.addListener(onUpdated);
+    const timer = setTimeout(() => finish(false), timeout);
+    if (requireLoading) {
+      noLoadTimer = setTimeout(() => { if (!seenLoading) finish(true); }, 2000);
+    } else {
+      chrome.tabs.get(tabId).then((tab) => {
+        if (tab.status === "complete" && tab.url && tab.url !== "about:blank") finish(true);
+      }).catch(() => finish(false));
+    }
+  });
+}
+
 async function navigateToUrl(url, waitFor, timeout = 10000, tabId = null, openNewTab = false) {
   if (openNewTab) {
     const created = await createSingleTab(url, true, waitFor, timeout);
@@ -1138,7 +1190,9 @@ async function navigateToUrl(url, waitFor, timeout = 10000, tabId = null, openNe
   }
   const activeTab = await resolveTargetTab(tabId);
 
+  const loaded = waitForTabLoad(activeTab.id, timeout, { requireLoading: true });
   await browser.tabs.update(activeTab.id, { url });
+  const didLoad = await loaded;
   
   // If waitFor is specified, wait for the element to appear
   if (waitFor) {
@@ -1149,7 +1203,14 @@ async function navigateToUrl(url, waitFor, timeout = 10000, tabId = null, openNe
     }
   }
   
-  return { success: true, tabId: activeTab.id, url: url };
+  const after = await browser.tabs.get(activeTab.id).catch(() => null);
+  return {
+    success: true,
+    tabId: activeTab.id,
+    url: after?.url || url,
+    title: after?.title,
+    ...(didLoad ? {} : { warning: `Page did not finish loading within ${timeout}ms` }),
+  };
 }
 
 async function waitForElement(tabId, selector, timeout = 5000) {
@@ -1279,9 +1340,9 @@ async function createSingleTab(url, active, wait_for, timeout) {
   const newTab = await browser.tabs.create(createProperties);
   console.log(`📝 Tab created:`, { id: newTab.id, url: newTab.url, pendingUrl: newTab.pendingUrl });
   
-  // Wait a moment for the URL to load
+  // Wait for the page to load (claude-for-arc: was a fixed 500ms)
   if (url) {
-    await new Promise(resolve => setTimeout(resolve, 500));
+    await waitForTabLoad(newTab.id, timeout);
     
     // Check if tab loaded correctly
     try {

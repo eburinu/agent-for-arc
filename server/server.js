@@ -45,6 +45,7 @@ const AUTH_TIMEOUT_MS = 5000;
 const STANDBY_RETRY_MS = 3000;
 const TAKEOVER_BACKOFF_MS = 10000;
 const TOOL_TIMEOUT_MS = 60000;
+const EXTENSION_WAIT_MS = Number(process.env.CFA_EXTENSION_WAIT_MS) || 10000;
 
 function log(...args) {
   // stdout is the MCP channel; everything human-readable goes to stderr.
@@ -102,6 +103,7 @@ let wss = null;
 let extensionSocket = null;
 let availableTools = [];
 let standbyTimer = null;
+let standbyLogged = false;
 const pendingCalls = new Map();
 let callCounter = 0;
 
@@ -318,11 +320,35 @@ async function acquirePort({ takeover }) {
       }
     }
     if (takeover) log(`Port ${PORT} is busy and its owner did not step aside; waiting in standby`);
+    else if (!standbyTimer && !standbyLogged) {
+      standbyLogged = true;
+      log(`Port ${PORT} is held by another session; standby until a tool is called here`);
+    }
     standbyTimer = setTimeout(() => acquirePort({ takeover: false }).catch(fatal), STANDBY_RETRY_MS);
     return;
   }
   wss.on("connection", handleConnection);
+  standbyLogged = false;
   log(`Listening on ws://${HOST}:${PORT} for the extension`);
+}
+
+// The browser belongs to the session that last used it: a session that only
+// starts up (the app opens helper sessions too) waits in standby, and takes
+// the port over when it actually calls a tool.
+let ownershipPromise = null;
+function ensureOwnership() {
+  if (wss) return Promise.resolve();
+  if (!ownershipPromise) {
+    ownershipPromise = acquirePort({ takeover: true }).finally(() => { ownershipPromise = null; });
+  }
+  return ownershipPromise;
+}
+
+async function waitForExtension(ms) {
+  const start = Date.now();
+  while (!extensionReady() && Date.now() - start < ms) {
+    await new Promise((r) => setTimeout(r, 100));
+  }
 }
 
 function enterStandby() {
@@ -351,15 +377,19 @@ function writeMessage(message) {
 
 function notConnectedText() {
   if (!wss) {
-    return "❌ Браузер сейчас занят другой сессией Claude (claude-for-arc в режиме ожидания). " +
-      "Закройте ту сессию или подождите — эта подхватит браузер, когда он освободится.";
+    return "Не удалось забрать браузер у другой сессии Claude: порт занят, а его владелец не уступил. " +
+      "Возможно, порт занят другой программой.";
   }
   return "❌ Расширение claude-for-arc не подключено. Откройте Arc, убедитесь, что расширение " +
     "включено, и вставьте ключ подключения в его окно (значок расширения на панели Arc).";
 }
 
-function callBrowserTool(name, args) {
-  if (!extensionReady()) return Promise.reject(new Error(notConnectedText()));
+async function callBrowserTool(name, args) {
+  await ensureOwnership();
+  // Right after a takeover or a server start the extension needs a moment to
+  // (re)connect; wait for it instead of failing the first call.
+  if (!extensionReady()) await waitForExtension(EXTENSION_WAIT_MS);
+  if (!extensionReady()) throw new Error(notConnectedText());
   const id = `${Date.now()}-${++callCounter}`;
   return new Promise((resolve, reject) => {
     const timeout = setTimeout(() => {
@@ -430,7 +460,7 @@ async function handleMCPRequest(request) {
 }
 
 let inputBuffer = "";
-process.stdin.on("data", async (chunk) => {
+process.stdin.on("data", (chunk) => {
   inputBuffer += chunk.toString();
   const lines = inputBuffer.split("\n");
   inputBuffer = lines.pop() || "";
@@ -443,8 +473,9 @@ process.stdin.on("data", async (chunk) => {
       log("Ignoring a line that is not JSON");
       continue;
     }
-    const response = await handleMCPRequest(request);
-    if (response) writeMessage(response);
+    // Not awaited: a tool call waiting on the browser must not hold up pings
+    // or other requests behind it.
+    handleMCPRequest(request).then((response) => { if (response) writeMessage(response); });
   }
 });
 
@@ -472,4 +503,4 @@ function fatal(error) {
   process.exit(1);
 }
 
-acquirePort({ takeover: true }).catch(fatal);
+acquirePort({ takeover: false }).catch(fatal);
