@@ -2042,7 +2042,7 @@ chrome.storage.onChanged.addListener((changes, area) => {
   } else if (changes.allowHistory || changes.scope) {
     connectionManager.reregister();
   }
-  if (changes.paused) guard.setBadge(connectionManager.getStatus().state);
+  if (changes.paused || changes.lang) guard.setBadge(connectionManager.getStatus().state);
 });
 
 // Only this extension's own pages (the popup) may ask for status; content

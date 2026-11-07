@@ -1,0 +1,5 @@
+{
+  "description": {
+    "message": "Даёт Claude управлять браузером Arc. Основано на OpenDia (MIT)."
+  }
+}

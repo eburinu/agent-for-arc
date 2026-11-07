@@ -3,6 +3,7 @@
 
 export const DEFAULT_SETTINGS = Object.freeze({
   token: "",
+  lang: "", // "en" / "ru"; empty: follow Arc's language
   port: 5555,
   scope: "own",
   readOnly: false,

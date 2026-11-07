@@ -26,6 +26,7 @@ import {
 } from "./policy.js";
 
 export { decorateTools } from "./policy.js";
+import { translator } from "../i18n.js";
 
 const LOG_LIMIT = 200;
 
@@ -287,16 +288,16 @@ export async function logCall(entry) {
 }
 
 const BADGES = {
-  connected: { text: "ON", color: "#16a34a", title: "claude-for-arc: подключено" },
-  paused: { text: "II", color: "#6b7280", title: "claude-for-arc: пауза" },
-  nokey: { text: "!", color: "#dc2626", title: "claude-for-arc: вставьте ключ подключения" },
-  badkey: { text: "!", color: "#dc2626", title: "claude-for-arc: неверный ключ" },
-  offline: { text: "", color: "#6b7280", title: "claude-for-arc: сервер не запущен" },
+  connected: { text: "ON", color: "#16a34a", title: "badgeConnected" },
+  paused: { text: "II", color: "#6b7280", title: "badgePaused" },
+  nokey: { text: "!", color: "#dc2626", title: "badgeNokey" },
+  badkey: { text: "!", color: "#dc2626", title: "badgeBadkey" },
+  offline: { text: "", color: "#6b7280", title: "badgeOffline" },
 };
 
 export function setBadge(state) {
   const badge = settings.paused && state === "connected" ? BADGES.paused : BADGES[state] || BADGES.offline;
   chrome.action.setBadgeText({ text: badge.text });
   chrome.action.setBadgeBackgroundColor({ color: badge.color });
-  chrome.action.setTitle({ title: badge.title });
+  chrome.action.setTitle({ title: translator(settings.lang)(badge.title) });
 }

@@ -1,8 +1,9 @@
 {
   "manifest_version": 3,
   "name": "claude-for-arc",
-  "version": "0.3.1",
-  "description": "Мост между Claude и браузером Arc. Основано на OpenDia (MIT).",
+  "version": "0.3.2",
+  "description": "__MSG_description__",
+  "default_locale": "en",
   "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAokQKyFv2Mwapwp43l5BbziJ6/3o2k8aqwSfNwOjsUDWzQ59Nk8WxN1vSlFrirx+c2KcKKqadw97H35T29Pw1TjvTFnrTeXlaasij7S4LX3/5kn98u8wiZnEOoZBNexk5u8AdSVV53Tkb9g+m3cfdxQWkTWA06GDltCPKzdEGrLcm2QGTztfFIsyV0uS0B4NAc078J3MJpf5xHGpt4cZaFCCCDTANiHIO07J2L4LIf45GaqQSqvr6VSe6tbi/ZVHxvBUgI7At8K4ueESjLYcmvbUgnxOl1Sr603/TlzZvSN4Og8bZIU6O8oIB9hYiEaa0Yv+C4Uz7C5pXeYzJPkaO+QIDAQAB",
   "minimum_chrome_version": "120",
   "icons": {
@@ -33,6 +34,6 @@
     "default_title": "claude-for-arc"
   },
   "content_security_policy": {
-    "extension_pages": "script-src 'self'; object-src 'none'; connect-src ws://127.0.0.1:*"
+    "extension_pages": "script-src 'self'; object-src 'none'; connect-src 'self' ws://127.0.0.1:*"
   }
 }

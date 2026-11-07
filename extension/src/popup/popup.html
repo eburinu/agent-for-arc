@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="ru">
+<html lang="en">
 <head>
   <meta charset="UTF-8">
   <title>claude-for-arc</title>
@@ -35,7 +35,10 @@
       color: var(--text);
       font: 13px/1.4 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
     }
-    header { display: flex; align-items: baseline; gap: 8px; margin-bottom: 10px; }
+    header { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 10px; }
+    .lang { display: inline-flex; border: 1px solid var(--border); border-radius: 999px; padding: 2px; background: var(--surface); }
+    .lang button { border: 0; background: transparent; border-radius: 999px; padding: 2px 9px; font-size: 11px; font-weight: 600; color: var(--muted); }
+    .lang button[aria-pressed=true] { background: var(--accent); color: #fff; }
     h1 { font-size: 15px; margin: 0; }
     section { border-top: 1px solid var(--border); padding: 10px 0; }
     h2 { font-size: 11px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); margin: 0 0 6px; font-weight: 600; }
@@ -76,70 +79,74 @@
 <body>
   <header>
     <h1>claude-for-arc</h1>
+    <div class="lang" role="group" aria-label="Language">
+      <button id="langEn" data-lang="en" aria-pressed="false">EN</button>
+      <button id="langRu" data-lang="ru" aria-pressed="false">RU</button>
+    </div>
   </header>
 
   <section>
     <div class="status">
       <span class="dot" id="dot"></span>
-      <span id="statusText">Проверяю…</span>
-      <button id="reconnect">Переподключить</button>
+      <span id="statusText" data-i18n="checking"></span>
+      <button id="reconnect" data-i18n="reconnect"></button>
     </div>
     <p class="hint" id="statusHint"></p>
   </section>
 
   <section>
     <div class="pause" id="pauseRow">
-      <span id="pauseText">Claude может управлять браузером</span>
-      <button id="pause">Пауза</button>
+      <span id="pauseText"></span>
+      <button id="pause"></button>
     </div>
   </section>
 
   <section id="keySection">
-    <h2>Ключ подключения</h2>
+    <h2 data-i18n="keyTitle"></h2>
     <div id="keySaved" hidden>
       <div class="row">
-        <span class="saved">Ключ на месте</span>
-        <button id="changeKey">Ввести вручную</button>
+        <span class="saved" data-i18n="keyInPlace"></span>
+        <button id="changeKey" data-i18n="enterManually"></button>
       </div>
     </div>
     <div id="keyForm" hidden>
       <div class="row">
-        <input type="password" id="token" placeholder="64 символа" autocomplete="off" spellcheck="false">
-        <button class="primary" id="saveToken">Сохранить</button>
+        <input type="password" id="token" data-i18n-placeholder="keyPlaceholder" autocomplete="off" spellcheck="false">
+        <button class="primary" id="saveToken" data-i18n="save"></button>
       </div>
-      <p class="hint">Обычно ключ приходит от коннектора claude-for-arc сам. Вручную — только для установки через install.sh: <code>cat ~/Library/Application\ Support/claude-for-arc/token</code>.</p>
+      <p class="hint"><span data-i18n="keyHint"></span> <code>cat ~/Library/Application\ Support/claude-for-arc/token</code>.</p>
     </div>
   </section>
 
   <section>
-    <h2>Доступ</h2>
+    <h2 data-i18n="accessTitle"></h2>
     <label class="opt"><input type="radio" name="scope" value="own">
-      <span>Только вкладки, открытые Claude <span class="hint">(рекомендуется)</span></span></label>
+      <span><span data-i18n="scopeOwn"></span> <span class="hint" data-i18n="recommended"></span></span></label>
     <label class="opt"><input type="radio" name="scope" value="all">
-      <span>Все вкладки, включая мои</span></label>
+      <span data-i18n="scopeAll"></span></label>
     <label class="opt"><input type="checkbox" id="readOnly">
-      <span>Только чтение: без кликов, ввода и закрытия вкладок</span></label>
+      <span data-i18n="readOnly"></span></label>
     <label class="opt"><input type="checkbox" id="allowHistory">
-      <span>Разрешить историю и закладки</span></label>
+      <span data-i18n="allowHistory"></span></label>
   </section>
 
   <section>
-    <h2>Запрещённые сайты</h2>
-    <textarea id="blocklist" spellcheck="false" placeholder="mybank.ru"></textarea>
+    <h2 data-i18n="blockedTitle"></h2>
+    <textarea id="blocklist" spellcheck="false" placeholder="mybank.com"></textarea>
     <div class="row">
-      <button id="saveBlocklist">Сохранить список</button>
-      <span class="saved" id="blocklistSaved" hidden>Сохранено</span>
+      <button id="saveBlocklist" data-i18n="saveList"></button>
+      <span class="saved" id="blocklistSaved" data-i18n="saved" hidden></span>
     </div>
-    <p class="hint">По одному домену в строке; поддомены тоже закрыты. Магазины расширений закрыты всегда.</p>
+    <p class="hint" data-i18n="blockedHint"></p>
   </section>
 
   <section>
-    <h2>Последние действия</h2>
+    <h2 data-i18n="logTitle"></h2>
     <ul id="log"></ul>
-    <p class="hint" id="logEmpty">Пока ничего.</p>
+    <p class="hint" id="logEmpty" data-i18n="logEmpty"></p>
   </section>
 
-  <footer>Не связано с Anthropic. Основано на OpenDia (MIT).</footer>
+  <footer data-i18n="footer"></footer>
 
   <script type="module" src="popup.js"></script>
 </body>

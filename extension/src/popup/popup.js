@@ -1,14 +1,27 @@
 import { DEFAULT_SETTINGS, parseBlocklist } from "../background/policy.js";
+import { translator, resolveLang } from "../i18n.js";
 
 const $ = (id) => document.getElementById(id);
 
+let t = translator("");
+let lastStatus = { state: "offline" };
+
 const STATUS = {
-  connected: ["Подключено к Claude", ""],
-  connecting: ["Подключаюсь…", ""],
-  offline: ["Сервер не запущен", "Откройте приложение Claude: коннектор claude-for-arc запускается вместе с ним, и расширение подключится само. Коннектора нет — скачайте claude-for-arc.mcpb и откройте его двойным кликом."],
-  nokey: ["Нужен ключ подключения", "Откройте это окно ещё раз — расширение создаст ключ."],
-  badkey: ["Ключи не совпадают", "Перезапустите Claude — коннектор заново положит ключ в папку расширения. Если ставили через install.sh: вставьте ключ вручную ниже."],
+  connected: ["connected", null],
+  connecting: ["connecting", null],
+  offline: ["offline", "offlineHint"],
+  nokey: ["nokey", "nokeyHint"],
+  badkey: ["badkey", "badkeyHint"],
 };
+
+function applyLanguage(setting) {
+  t = translator(setting);
+  const lang = resolveLang(setting);
+  document.documentElement.lang = lang;
+  for (const el of document.querySelectorAll("[data-i18n]")) el.textContent = t(el.dataset.i18n);
+  for (const el of document.querySelectorAll("[data-i18n-placeholder]")) el.placeholder = t(el.dataset.i18nPlaceholder);
+  for (const button of document.querySelectorAll(".lang button")) button.setAttribute("aria-pressed", String(button.dataset.lang === lang));
+}
 
 async function loadSettings() {
   return { ...DEFAULT_SETTINGS, ...(await chrome.storage.local.get(Object.keys(DEFAULT_SETTINGS))) };
@@ -19,19 +32,25 @@ async function refreshStatus() {
   try {
     status = await chrome.runtime.sendMessage({ action: "getStatus" });
   } catch {}
+  lastStatus = status && status.state ? status : { state: "offline" };
+  renderStatus();
+}
+
+function renderStatus() {
+  const status = lastStatus;
   const [text, hint] = STATUS[status.state] || STATUS.offline;
   $("dot").className = `dot ${status.state}`;
-  $("statusText").textContent = text;
+  $("statusText").textContent = t(text);
   $("statusHint").textContent =
     status.state === "connected" && status.agentTabs
-      ? `Вкладок, открытых Claude: ${status.agentTabs}`
-      : hint;
+      ? t("agentTabs", { n: status.agentTabs })
+      : hint ? t(hint) : "";
 }
 
 function renderPause(paused) {
   $("pauseRow").classList.toggle("on", paused);
-  $("pauseText").textContent = paused ? "Пауза: Claude ничего не может делать" : "Claude может управлять браузером";
-  $("pause").textContent = paused ? "Снять паузу" : "Пауза";
+  $("pauseText").textContent = paused ? t("pausedText") : t("canControl");
+  $("pause").textContent = paused ? t("resume") : t("pause");
 }
 
 function renderKey(token) {
@@ -70,6 +89,7 @@ async function renderLog() {
 
 async function init() {
   const settings = await loadSettings();
+  applyLanguage(settings.lang);
   renderPause(settings.paused);
   renderKey(settings.token);
   for (const radio of document.querySelectorAll("input[name=scope]")) radio.checked = radio.value === settings.scope;
@@ -77,6 +97,15 @@ async function init() {
   $("allowHistory").checked =
     settings.allowHistory && (await chrome.permissions.contains({ permissions: ["history", "bookmarks"] }));
   $("blocklist").value = settings.blocklist.join("\n");
+
+  for (const button of document.querySelectorAll(".lang button")) {
+    button.addEventListener("click", async () => {
+      await chrome.storage.local.set({ lang: button.dataset.lang });
+      applyLanguage(button.dataset.lang);
+      renderPause((await loadSettings()).paused);
+      renderStatus();
+    });
+  }
 
   $("reconnect").addEventListener("click", async () => {
     $("reconnect").disabled = true;
@@ -94,7 +123,7 @@ async function init() {
   $("saveToken").addEventListener("click", async () => {
     const token = $("token").value.trim().toLowerCase();
     if (!/^[0-9a-f]{64}$/.test(token)) {
-      $("statusHint").textContent = "Ключ — это 64 символа 0–9 и a–f. Скопируйте его целиком.";
+      $("statusHint").textContent = t("keyInvalid");
       return;
     }
     await chrome.storage.local.set({ token });

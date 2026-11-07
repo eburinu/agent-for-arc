@@ -27,7 +27,7 @@ claude-for-arc даёт приложению Claude на Mac управлять 
    - включите **«Режим разработчика»** (Developer mode) — переключатель справа вверху;
    - нажмите **«Загрузить распакованное»** (Load unpacked) и выберите папку `extension` из Finder (путь: `~/claude-for-arc/extension`).
 
-Готово. Значок claude-for-arc появится на панели расширений Arc. Нажмите на него: там должно быть **«Подключено к Claude»**.
+Готово. Значок claude-for-arc появится на панели расширений Arc. Нажмите на него: там должно быть **«Подключено к Claude»**. Переключатель EN / RU справа вверху меняет язык.
 
 > Ключ подключения копировать не нужно: коннектор сам кладёт его в папку расширения.
 
@@ -109,7 +109,7 @@ Nothing else to install.
    - turn on **Developer mode** (switch in the top right);
    - click **Load unpacked** and pick the `extension` folder from Finder (path: `~/claude-for-arc/extension`).
 
-Done. The claude-for-arc icon appears in Arc's extensions bar. Click it: it should say «Подключено к Claude» (connected; the extension window is in Russian).
+Done. The claude-for-arc icon appears in Arc's extensions bar. Click it: it should say "Connected to Claude". The EN / RU switch in the top right changes the language.
 
 > You don't need to copy any key: the connector puts it into the extension folder for you.
 
