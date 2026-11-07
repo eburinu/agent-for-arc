@@ -70,5 +70,16 @@ test("page_navigate gains a tab_id parameter", () => {
     DEFAULT_SETTINGS
   );
   assert.ok(nav.inputSchema.properties.tab_id);
-  assert.match(nav.description, /claude-for-arc/);
+  assert.match(nav.description, /agent tab/);
+});
+
+test("the scope note goes on tab tools only, not on every description", () => {
+  const tools = decorateTools(
+    ["tab_create", "element_click", "run_steps"].map((name) => ({ name, description: "x", inputSchema: { type: "object", properties: {} } })),
+    DEFAULT_SETTINGS
+  );
+  const byName = Object.fromEntries(tools.map((t) => [t.name, t.description]));
+  assert.match(byName.tab_create, /user's own tabs are hidden/);
+  assert.match(byName.run_steps, /user's own tabs are hidden/);
+  assert.equal(byName.element_click, "x");
 });

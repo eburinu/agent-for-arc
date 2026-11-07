@@ -251,85 +251,29 @@ function pingContentScript(tabId, timeoutMs) {
   });
 }
 
-async function ensureContentScriptReady(tabId, retries = 3) {
-  for (let attempt = 1; attempt <= retries; attempt++) {
-    try {
-      // Test if content script is responsive
-      const response = await pingContentScript(tabId, 2000);
-
-      if (response && response.success) {
-        console.log(`✅ Content script ready in tab ${tabId}`);
-        return true;
-      }
-    } catch (error) {
-      console.log(`⚠️ Content script not responsive in tab ${tabId}, attempt ${attempt}/${retries}`);
-      
-      if (attempt === retries) {
-        // Last attempt - try to inject content script
-        try {
-          const tab = await browser.tabs.get(tabId);
-          
-          // Check if tab URL is injectable (not chrome://, chrome-extension://, etc.)
-          if (!isInjectableUrl(tab.url)) {
-            throw new Error(`Cannot inject content script into ${tab.url} - restricted URL`);
-          }
-          
-          console.log(`🔄 Injecting content script into tab ${tabId}`);
-          
-          // Use appropriate API based on browser
-          if (browser.scripting) {
-            // Chrome MV3
-            await browser.scripting.executeScript({
-              target: { tabId: tabId },
-              files: ['src/content/content.js']
-            });
-          } else {
-            // Firefox MV2 - check if already injected first
-            try {
-              const result = await browser.tabs.executeScript(tabId, {
-                code: 'typeof window.OpenDiaContentScriptLoaded !== "undefined"'
-              });
-              
-              if (result && result[0]) {
-                console.log(`🔄 Content script already present in tab ${tabId}`);
-                return true;
-              }
-            } catch (e) {
-              // Continue with injection if check fails
-            }
-            
-            await browser.tabs.executeScript(tabId, {
-              file: 'src/content/content.js'
-            });
-          }
-          
-          // Wait a moment for script to initialize
-          await new Promise(resolve => setTimeout(resolve, 1000));
-          
-          // Test again
-          const testResponse = await pingContentScript(tabId, 3000);
-
-          if (testResponse && testResponse.success) {
-            console.log(`✅ Content script successfully injected into tab ${tabId}`);
-            return true;
-          }
-          
-        } catch (injectionError) {
-          throw new Error(`Failed to inject content script into tab ${tabId}: ${injectionError.message}`);
-        }
-      }
-      
-      // Wait before retry
-      if (attempt < retries) {
-        await new Promise(resolve => setTimeout(resolve, 1000));
-      }
-    }
+// claude-for-arc: ask the page's script once; if it is not there (a fresh
+// page), inject it right away and poll briefly, instead of three timed retries.
+async function ensureContentScriptReady(tabId) {
+  const alive = await pingContentScript(tabId, 400).then((r) => r?.success, () => false);
+  if (alive) return true;
+  const tab = await browser.tabs.get(tabId);
+  if (!isInjectableUrl(tab.url)) {
+    throw new Error(`Cannot inject content script into ${tab.url} - restricted URL`);
   }
-  
-  throw new Error(`Content script not available in tab ${tabId} after ${retries} attempts`);
+  try {
+    await browser.scripting.executeScript({ target: { tabId }, files: ['src/content/content.js'] });
+  } catch (error) {
+    throw new Error(`Failed to inject content script into tab ${tabId}: ${error.message}`);
+  }
+  const deadline = Date.now() + 3000;
+  while (Date.now() < deadline) {
+    const ready = await pingContentScript(tabId, 300).then((r) => r?.success, () => false);
+    if (ready) return true;
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
+  throw new Error(`Content script not available in tab ${tabId}`);
 }
 
-// Check if URL allows content script injection
 function isInjectableUrl(url) {
   if (!url) return false;
   
@@ -375,616 +319,250 @@ async function getTabContentScriptStatus(tabId) {
 }
 
 // Define available browser automation tools for MCP
+// Tool list advertised to Claude. Descriptions are kept short: Claude reads
+// them on every step, so every word costs time.
+const TAB = { type: "number", description: "Tab id (from tab_create / tab_list). Default: the current agent tab." };
+const TARGET = {
+  element_id: { type: "string", description: "Id from page_analyze." },
+  text: { type: "string", description: "Instead of element_id: the button/link text or aria-label, e.g. \"Отправить\"." },
+  label: { type: "string", description: "Instead of element_id: a field's label, placeholder or aria-label." },
+  selector: { type: "string", description: "Instead of element_id: a CSS selector." },
+  index: { type: "number", description: "Which match to use when several fit (0 = best).", default: 0 },
+};
+const STEP_TOOLS = [
+  "tab_create", "page_navigate", "page_wait_for", "element_click", "element_fill", "press_key",
+  "page_scroll", "page_analyze", "page_extract_content", "element_get_state", "get_page_links", "tab_close", "sleep",
+];
+
 function getAvailableTools() {
   return [
-    /*
-    🎯 BACKGROUND TAB WORKFLOW GUIDE:
-    
-    1. DISCOVER TABS: Use tab_list with check_content_script=false to see all tabs and their IDs
-    2. TARGET SPECIFIC TABS: Add tab_id parameter to any tool to work on background tabs
-    3. MULTI-TAB OPERATIONS: Process multiple tabs without switching between them
-    
-    Example Multi-Tab Workflow:
-    - tab_list({check_content_script: false}) → Get tab IDs quickly
-    - page_analyze({intent_hint: "article", tab_id: 12345}) → Analyze background research tab
-    - page_extract_content({content_type: "article", tab_id: 12345}) → Extract content without switching
-    - get_selected_text({tab_id: 67890}) → Get quotes from another background tab
-    
-    Perfect for: Research workflows, content analysis, form processing, social media management
-    */
-    
-    // Page Analysis Tools
     {
-      name: "page_analyze",
-      description: "🔍 BACKGROUND TAB READY: Analyze any tab without switching to it! Two-phase intelligent page analysis with token efficiency optimization. Use tab_id parameter to analyze background tabs while staying on current page.",
+      name: "run_steps",
+      description:
+        "Run several browser actions in ONE call, in order, and get one compact report. Use it for any " +
+        "multi-step job (open page → fill → click/Enter → check), and for repeating it, e.g. sending N messages: " +
+        "it is far faster than one call per action. Each step is {tool, args} with the same args as that tool; " +
+        "steps without tab_id use the tab of the previous step (tab_create/page_navigate set it). " +
+        "Elements can be named by text/label/selector, so page_analyze is rarely needed. " +
+        "Extra step tool: sleep {ms}. Stops at the first failed step unless stop_on_error is false.",
       inputSchema: {
         type: "object",
-        examples: [
-          { intent_hint: "analyze", phase: "discover" },  // Current tab quick analysis
-          { intent_hint: "login", tab_id: 12345 },  // Background tab login form analysis
-          { intent_hint: "post_create", tab_id: 67890, phase: "detailed" }  // Background tab detailed analysis
-        ],
         properties: {
-          intent_hint: {
-            type: "string",
-            description: "User intent: login, signup, search, post_create, comment, menu, submit, etc."
-          },
-          phase: {
-            type: "string",
-            enum: ["discover", "detailed"],
-            default: "discover",
-            description: "Analysis phase: 'discover' for quick scan (<100 tokens), 'detailed' for full analysis"
-          },
-          focus_areas: {
+          steps: {
             type: "array",
-            items: { type: "string" },
-            description: "Areas to analyze in detail: buttons, forms, navigation, search_elements"
+            maxItems: 100,
+            items: {
+              type: "object",
+              properties: {
+                tool: { type: "string", enum: STEP_TOOLS },
+                args: { type: "object" },
+              },
+              required: ["tool"],
+            },
           },
-          max_results: {
-            type: "number",
-            default: 5,
-            maximum: 15,
-            description: "Maximum number of elements to return"
-          },
-          element_ids: {
-            type: "array",
-            items: { type: "string" },
-            description: "Expand specific quick match IDs from discover phase (e.g. ['q1', 'q2'])"
-          },
-          tab_id: {
-            type: "number",
-            description: "🎯 TARGET ANY TAB: Specify tab ID to analyze background tabs without switching! Get tab IDs from tab_list. If omitted, analyzes current active tab."
-          }
+          stop_on_error: { type: "boolean", default: true },
+          tab_id: TAB,
         },
-        required: ["intent_hint"]
-      }
+        required: ["steps"],
+      },
+    },
+    {
+      name: "page_analyze",
+      description: "List the page's interactive elements (buttons, fields, links) with ids for element_click/element_fill. Often unnecessary: those tools also accept text/label/selector.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          intent_hint: { type: "string", description: "What you look for: login, search, send message, submit, menu…" },
+          phase: { type: "string", enum: ["discover", "detailed"], default: "discover" },
+          max_results: { type: "number", default: 5, maximum: 15 },
+          element_ids: { type: "array", items: { type: "string" }, description: "Expand these ids from a discover result." },
+          tab_id: TAB,
+        },
+        required: ["intent_hint"],
+      },
     },
     {
       name: "page_extract_content",
-      description: "📄 BACKGROUND TAB READY: Extract content from any tab without switching! Perfect for analyzing multiple research tabs, articles, or pages simultaneously. Use tab_id to target specific background tabs.",
+      description: "Read the page's main text (article, search results or posts).",
       inputSchema: {
         type: "object",
-        examples: [
-          { content_type: "article" },  // Extract from current tab
-          { content_type: "article", tab_id: 12345 },  // Extract from background research tab
-          { content_type: "posts", tab_id: 67890, max_items: 10 }  // Extract social media posts from background tab
-        ],
         properties: {
-          content_type: {
-            type: "string",
-            enum: ["article", "search_results", "posts"],
-            description: "Type of content to extract"
-          },
-          max_items: {
-            type: "number",
-            description: "Maximum number of items to extract (for lists/collections)",
-            default: 20
-          },
-          summarize: {
-            type: "boolean",
-            default: true,
-            description: "Return summary instead of full content to save tokens"
-          },
-          tab_id: {
-            type: "number",
-            description: "🎯 TARGET ANY TAB: Extract content from specific background tab without switching! Use tab_list to get tab IDs. Perfect for processing multiple research tabs."
-          }
+          content_type: { type: "string", enum: ["article", "search_results", "posts"] },
+          summarize: { type: "boolean", default: true, description: "false = full text (up to 40k chars)." },
+          max_items: { type: "number", default: 20 },
+          tab_id: TAB,
         },
-        required: ["content_type"]
-      }
+        required: ["content_type"],
+      },
     },
-    
-    // Element Interaction Tools
     {
       name: "element_click",
-      description: "🖱️ BACKGROUND TAB READY: Click elements in any tab without switching! Perform actions on background tabs while staying on current page. Use tab_id to target specific tabs.",
+      description: "Click an element, named by element_id, text, label or selector. Waits until the page settles (up to wait_after ms).",
       inputSchema: {
         type: "object",
         properties: {
-          element_id: {
-            type: "string",
-            description: "Unique element identifier from page_analyze"
-          },
-          click_type: {
-            type: "string",
-            enum: ["left", "right", "double"],
-            default: "left"
-          },
-          wait_after: {
-            type: "number",
-            description: "Milliseconds to wait after click",
-            default: 500
-          },
-          tab_id: {
-            type: "number",
-            description: "🎯 TARGET ANY TAB: Click elements in background tabs without switching! Get tab IDs from tab_list to interact with multiple tabs efficiently."
-          }
+          ...TARGET,
+          click_type: { type: "string", enum: ["left", "right", "double"], default: "left" },
+          wait_after: { type: "number", default: 1000, description: "Max ms to wait for the page to settle." },
+          tab_id: TAB,
         },
-        required: ["element_id"]
-      }
+      },
     },
     {
       name: "element_fill",
-      description: "✏️ BACKGROUND TAB READY: Fill forms in any tab without switching! Enhanced focus and event simulation for modern web apps. Use tab_id to fill forms in background tabs.",
+      description: "Type a value into a field (input, textarea, contenteditable), named by element_id, label (placeholder) or selector. Password, code and card fields are refused.",
       inputSchema: {
         type: "object",
         properties: {
-          element_id: {
-            type: "string",
-            description: "Unique element identifier from page_analyze"
-          },
-          value: {
-            type: "string",
-            description: "Text value to input"
-          },
-          clear_first: {
-            type: "boolean",
-            description: "Clear existing content before filling",
-            default: true
-          },
-          force_focus: {
-            type: "boolean",
-            description: "Use enhanced focus sequence with click simulation for modern apps",
-            default: true
-          },
-          tab_id: {
-            type: "number",
-            description: "🎯 TARGET ANY TAB: Fill forms in background tabs without switching! Perfect for batch form filling across multiple tabs. Get tab IDs from tab_list."
-          }
+          ...TARGET,
+          value: { type: "string" },
+          clear_first: { type: "boolean", default: true },
+          tab_id: TAB,
         },
-        required: ["element_id", "value"]
-      }
+        required: ["value"],
+      },
     },
-    
-    // Navigation Tools
+    {
+      name: "press_key",
+      description: "Press a key (Enter, Escape, Tab, Backspace, arrows, a letter) on an element (element_id/text/label/selector) or the focused one. Enter in chat boxes usually sends; in a form field it submits the form.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          key: { type: "string", default: "Enter" },
+          modifiers: { type: "array", items: { type: "string", enum: ["ctrl", "meta", "shift", "alt"] } },
+          ...TARGET,
+          wait_after: { type: "number", default: 1000, description: "Max ms to wait for the page to settle." },
+          tab_id: TAB,
+        },
+      },
+    },
     {
       name: "page_navigate",
-      description: "Navigate CURRENT tab to a new URL. Use tab_create instead if you want to open a NEW tab with a URL.",
+      description: "Open a URL in a tab and wait for it to load.",
       inputSchema: {
         type: "object",
         properties: {
-          url: {
-            type: "string",
-            description: "URL to navigate to"
-          },
-          wait_for: {
-            type: "string",
-            description: "CSS selector to wait for after navigation (ensures page is ready)"
-          },
-          timeout: {
-            type: "number",
-            description: "Maximum wait time in milliseconds",
-            default: 10000
-          }
+          url: { type: "string" },
+          wait_for: { type: "string", description: "CSS selector to wait for after load." },
+          timeout: { type: "number", default: 10000 },
         },
-        required: ["url"]
-      }
+        required: ["url"],
+      },
     },
     {
       name: "page_wait_for",
-      description: "Wait for specific element or condition on current page",
+      description: "Wait until an element is visible or a text appears.",
       inputSchema: {
         type: "object",
         properties: {
-          condition_type: {
-            type: "string",
-            enum: ["element_visible", "text_present"],
-            description: "Type of condition to wait for"
-          },
-          selector: {
-            type: "string",
-            description: "CSS selector for element-based conditions"
-          },
-          text: {
-            type: "string",
-            description: "Text to wait for (when condition_type is 'text_present')"
-          },
-          timeout: {
-            type: "number",
-            description: "Maximum wait time in milliseconds",
-            default: 5000
-          }
+          condition_type: { type: "string", enum: ["element_visible", "text_present"] },
+          selector: { type: "string" },
+          text: { type: "string" },
+          timeout: { type: "number", default: 5000 },
         },
-        required: ["condition_type"]
-      }
+        required: ["condition_type"],
+      },
     },
-    
-    // Tab Management Tools
     {
       name: "tab_create",
-      description: "Creates tabs. CRITICAL: For multiple identical tabs, ALWAYS use 'count' parameter! Examples: {url: 'https://x.com', count: 5} creates 5 Twitter tabs. {url: 'https://github.com', count: 10} creates 10 GitHub tabs. Single tab: {url: 'https://example.com'}. Multiple different URLs: {urls: ['url1', 'url2']}.",
+      description: "Open a new tab (url) or several (urls) and wait for loading. The tab id it returns is the agent's tab.",
       inputSchema: {
         type: "object",
-        examples: [
-          { url: "https://x.com", count: 5 },  // CORRECT: Creates 5 identical Twitter tabs in one batch
-          { url: "https://github.com", count: 10 },  // CORRECT: Creates 10 GitHub tabs 
-          { urls: ["https://x.com/post1", "https://x.com/post2", "https://google.com"] },  // CORRECT: Different URLs in batch
-          { url: "https://example.com" }  // Single tab only
-        ],
         properties: {
-          url: {
-            type: "string",
-            description: "Single URL to open. Can be used with 'count' to create multiple identical tabs"
-          },
-          urls: {
-            type: "array",
-            items: { type: "string" },
-            description: "PREFERRED FOR MULTIPLE URLS: Array of URLs to open ALL AT ONCE in a single batch operation. Pass ALL URLs here instead of making multiple calls! Example: ['https://x.com/post1', 'https://x.com/post2', 'https://google.com']",
-            maxItems: 100
-          },
-          count: {
-            type: "number",
-            default: 1,
-            minimum: 1,
-            maximum: 50,
-            description: "REQUIRED FOR MULTIPLE IDENTICAL TABS: Set this to N to create N copies of the same URL. For '5 Twitter tabs' use count=5 with url='https://x.com'. DO NOT make 5 separate calls!"
-          },
-          active: {
-            type: "boolean",
-            default: true,
-            description: "Whether to activate the last created tab (single tab only)"
-          },
-          wait_for: {
-            type: "string",
-            description: "CSS selector to wait for after tab creation (single tab only)"
-          },
-          timeout: {
-            type: "number",
-            default: 10000,
-            description: "Maximum wait time per tab in milliseconds"
-          },
-          batch_settings: {
-            type: "object",
-            description: "Performance control settings for batch operations",
-            properties: {
-              chunk_size: {
-                type: "number",
-                default: 5,
-                minimum: 1,
-                maximum: 10,
-                description: "Number of tabs to create per batch"
-              },
-              delay_between_chunks: {
-                type: "number",
-                default: 1000,
-                minimum: 100,
-                maximum: 5000,
-                description: "Delay between batches in milliseconds"
-              },
-              delay_between_tabs: {
-                type: "number",
-                default: 200,
-                minimum: 50,
-                maximum: 1000,
-                description: "Delay between individual tabs in milliseconds"
-              }
-            }
-          }
-        }
-      }
+          url: { type: "string" },
+          urls: { type: "array", items: { type: "string" }, maxItems: 100 },
+          active: { type: "boolean", default: true },
+          wait_for: { type: "string", description: "CSS selector to wait for (single tab)." },
+          timeout: { type: "number", default: 10000 },
+        },
+      },
     },
     {
       name: "tab_close",
-      description: "Close specific tab(s) by ID or close current tab",
+      description: "Close tab(s) by id, or the current agent tab.",
       inputSchema: {
         type: "object",
-        properties: {
-          tab_id: {
-            type: "number",
-            description: "Specific tab ID to close (optional, closes current tab if not provided)"
-          },
-          tab_ids: {
-            type: "array",
-            items: { type: "number" },
-            description: "Array of tab IDs to close multiple tabs"
-          }
-        }
-      }
+        properties: { tab_id: { type: "number" }, tab_ids: { type: "array", items: { type: "number" } } },
+      },
     },
     {
       name: "tab_list",
-      description: "📋 TAB DISCOVERY: Get list of all open tabs with IDs for background tab targeting! Shows content script readiness status and tab details. Essential for multi-tab workflows - use tab IDs with other tools to work on background tabs.",
+      description: "List open tabs with ids.",
       inputSchema: {
         type: "object",
-        examples: [
-          { check_content_script: false },  // RECOMMENDED: Default false to avoid timeouts
-          { current_window_only: false, check_content_script: false }  // Get all tabs across windows
-        ],
-        properties: {
-          current_window_only: {
-            type: "boolean",
-            default: true,
-            description: "Only return tabs from the current window"
-          },
-          include_details: {
-            type: "boolean",
-            default: true,
-            description: "Include additional tab details (title, favicon, etc.)"
-          },
-          check_content_script: {
-            type: "boolean",
-            default: false,
-            description: "🔍 ESSENTIAL FOR BACKGROUND TABS: Check which tabs are ready for background operations! Set to true when planning multi-tab workflows to see which tabs can be targeted."
-          }
-        }
-      }
+        properties: { current_window_only: { type: "boolean", default: true } },
+      },
     },
     {
       name: "tab_switch",
-      description: "Switch to a specific tab by ID",
-      inputSchema: {
-        type: "object",
-        properties: {
-          tab_id: {
-            type: "number",
-            description: "Tab ID to switch to"
-          }
-        },
-        required: ["tab_id"]
-      }
+      description: "Bring a tab to the front.",
+      inputSchema: { type: "object", properties: { tab_id: { type: "number" } }, required: ["tab_id"] },
     },
-    
-    // Element State Tools
     {
       name: "element_get_state",
-      description: "Get detailed state information for a specific element (disabled, clickable, etc.)",
-      inputSchema: {
-        type: "object",
-        properties: {
-          element_id: {
-            type: "string",
-            description: "Element ID from page_analyze"
-          }
-        },
-        required: ["element_id"]
-      }
-    },
-    // Workspace and Reference Management Tools
-    {
-      name: "get_bookmarks",
-      description: "Get all bookmarks or search for specific bookmarks",
-      inputSchema: {
-        type: "object",
-        properties: {
-          query: {
-            type: "string",
-            description: "Search query for bookmarks (optional)"
-          }
-        }
-      }
-    },
-    {
-      name: "add_bookmark",
-      description: "Add a new bookmark",
-      inputSchema: {
-        type: "object",
-        properties: {
-          title: {
-            type: "string",
-            description: "Title of the bookmark"
-          },
-          url: {
-            type: "string",
-            description: "URL of the bookmark"
-          },
-          parentId: {
-            type: "string",
-            description: "ID of the parent folder (optional)"
-          }
-        },
-        required: ["title", "url"]
-      }
-    },
-    {
-      name: "get_history",
-      description: "Search browser history with comprehensive filters for finding previous work by date/keywords",
-      inputSchema: {
-        type: "object",
-        properties: {
-          keywords: {
-            type: "string",
-            description: "Search keywords to match in page titles and URLs"
-          },
-          start_date: {
-            type: "string",
-            format: "date-time",
-            description: "Start date for history search (ISO 8601 format)"
-          },
-          end_date: {
-            type: "string",
-            format: "date-time",
-            description: "End date for history search (ISO 8601 format)"
-          },
-          domains: {
-            type: "array",
-            items: { type: "string" },
-            description: "Filter by specific domains (e.g., ['github.com', 'stackoverflow.com'])"
-          },
-          min_visit_count: {
-            type: "number",
-            default: 1,
-            description: "Minimum visit count threshold"
-          },
-          max_results: {
-            type: "number",
-            default: 50,
-            maximum: 500,
-            description: "Maximum number of results to return"
-          },
-          sort_by: {
-            type: "string",
-            enum: ["visit_time", "visit_count", "title"],
-            default: "visit_time",
-            description: "Sort results by visit time, visit count, or title"
-          },
-          sort_order: {
-            type: "string",
-            enum: ["desc", "asc"],
-            default: "desc",
-            description: "Sort order (descending or ascending)"
-          }
-        }
-      }
-    },
-    {
-      name: "get_selected_text",
-      description: "📝 BACKGROUND TAB READY: Get selected text from any tab without switching! Perfect for collecting quotes, citations, or highlighted content from multiple research tabs simultaneously.",
-      inputSchema: {
-        type: "object",
-        properties: {
-          include_metadata: {
-            type: "boolean",
-            default: true,
-            description: "Include metadata about the selection (element info, position, etc.)"
-          },
-          max_length: {
-            type: "number",
-            default: 10000,
-            description: "Maximum length of text to return"
-          },
-          tab_id: {
-            type: "number",
-            description: "🎯 TARGET ANY TAB: Get selected text from background tabs without switching! Perfect for collecting quotes or snippets from multiple research tabs."
-          }
-        }
-      }
+      description: "Get an element's state and value (element_id, text, label or selector).",
+      inputSchema: { type: "object", properties: { ...TARGET, tab_id: TAB } },
     },
     {
       name: "page_scroll",
-      description: "📜 BACKGROUND TAB READY: Scroll any tab without switching! Critical for long pages. Navigate through content in background tabs while staying on current page. Use tab_id to target specific tabs.",
+      description: "Scroll the page (direction/amount) or to an element.",
       inputSchema: {
         type: "object",
         properties: {
-          direction: {
-            type: "string",
-            enum: ["up", "down", "left", "right", "top", "bottom"],
-            default: "down",
-            description: "Direction to scroll"
-          },
-          amount: {
-            type: "string",
-            enum: ["small", "medium", "large", "page", "custom"],
-            default: "medium",
-            description: "Amount to scroll"
-          },
-          pixels: {
-            type: "number",
-            description: "Custom pixel amount (when amount is 'custom')"
-          },
-          smooth: {
-            type: "boolean",
-            default: true,
-            description: "Use smooth scrolling animation"
-          },
-          element_id: {
-            type: "string",
-            description: "Scroll to specific element (overrides direction/amount)"
-          },
-          wait_after: {
-            type: "number",
-            default: 500,
-            description: "Milliseconds to wait after scrolling"
-          },
-          tab_id: {
-            type: "number",
-            description: "🎯 TARGET ANY TAB: Scroll content in background tabs without switching! Perfect for navigating long documents or pages in multiple tabs simultaneously."
-          }
-        }
-      }
+          direction: { type: "string", enum: ["up", "down", "left", "right", "top", "bottom"], default: "down" },
+          amount: { type: "string", enum: ["small", "medium", "large", "page", "custom"], default: "medium" },
+          pixels: { type: "number" },
+          element_id: { type: "string" },
+          tab_id: TAB,
+        },
+      },
     },
     {
       name: "get_page_links",
-      description: "Get all hyperlinks on the current page with filtering options",
+      description: "List the page's links.",
       inputSchema: {
         type: "object",
         properties: {
-          include_internal: {
-            type: "boolean",
-            default: true,
-            description: "Include links pointing at the current domain"
-          },
-          include_external: {
-            type: "boolean",
-            default: true,
-            description: "Include links pointing off the current domain"
-          },
-          domain_filter: {
-            type: "string",
-            description: "Only return links whose domain contains this string (optional)"
-          },
-          max_results: {
-            type: "number",
-            default: 100,
-            maximum: 200,
-            description: "Maximum links to return"
-          }
-        }
-      }
+          include_internal: { type: "boolean", default: true },
+          include_external: { type: "boolean", default: true },
+          domain_filter: { type: "string" },
+          max_results: { type: "number", default: 100, maximum: 200 },
+          tab_id: TAB,
+        },
+      },
     },
     {
-      name: "page_style",
-      description: "🎨 Transform page appearance with themes, colors, fonts, and fun effects! Apply preset themes like 'dark_hacker', 'retro_80s', or create custom styles. Perfect for making boring pages fun or improving readability.",
+      name: "get_selected_text",
+      description: "Get the text the user selected in a tab.",
+      inputSchema: { type: "object", properties: { max_length: { type: "number", default: 10000 }, tab_id: TAB } },
+    },
+    {
+      name: "get_bookmarks",
+      description: "Search bookmarks.",
+      inputSchema: { type: "object", properties: { query: { type: "string" } } },
+    },
+    {
+      name: "add_bookmark",
+      description: "Add a bookmark.",
       inputSchema: {
         type: "object",
-        examples: [
-          { mode: "preset", theme: "dark_hacker" },
-          { mode: "custom", background: "#000", text_color: "#00ff00", font: "monospace" },
-          { mode: "ai_mood", mood: "cozy coffee shop vibes", intensity: "strong" },
-          { mode: "effect", effect: "matrix_rain", duration: 30 }
-        ],
+        properties: { title: { type: "string" }, url: { type: "string" }, parentId: { type: "string" } },
+        required: ["title", "url"],
+      },
+    },
+    {
+      name: "get_history",
+      description: "Search browser history.",
+      inputSchema: {
+        type: "object",
         properties: {
-          mode: {
-            type: "string", 
-            enum: ["preset", "custom", "ai_mood", "effect", "reset"],
-            description: "Styling mode to use"
-          },
-          theme: {
-            type: "string",
-            enum: ["dark_hacker", "retro_80s", "rainbow_party", "minimalist_zen", "high_contrast", "cyberpunk", "pastel_dream", "newspaper"],
-            description: "Preset theme name (when mode=preset)"
-          },
-          background: { 
-            type: "string", 
-            description: "Background color/gradient" 
-          },
-          text_color: { 
-            type: "string", 
-            description: "Text color" 
-          },
-          font: { 
-            type: "string", 
-            description: "Font family" 
-          },
-          font_size: { 
-            type: "string", 
-            description: "Font size (e.g., '1.2em', '16px')" 
-          },
-          mood: { 
-            type: "string", 
-            description: "Describe desired mood/feeling (when mode=ai_mood)" 
-          },
-          intensity: { 
-            type: "string", 
-            enum: ["subtle", "medium", "strong"], 
-            default: "medium" 
-          },
-          effect: { 
-            type: "string", 
-            enum: ["matrix_rain", "floating_particles", "cursor_trail", "neon_glow", "typing_effect"] 
-          },
-          duration: { 
-            type: "number", 
-            description: "Effect duration in seconds", 
-            default: 10 
-          },
-          remember: { 
-            type: "boolean", 
-            description: "Remember this style for this website", 
-            default: false 
-          }
+          keywords: { type: "string" },
+          start_date: { type: "string", format: "date-time" },
+          end_date: { type: "string", format: "date-time" },
+          domains: { type: "array", items: { type: "string" } },
+          max_results: { type: "number", default: 50, maximum: 500 },
         },
-        required: ["mode"]
-      }
+      },
     },
   ];
 }
@@ -992,122 +570,146 @@ function getAvailableTools() {
 // Handle MCP requests with enhanced automation tools
 async function handleMCPRequest(message) {
   const { id, method } = message;
-  let host = "";
-
   try {
-    // claude-for-arc policy: scope, read-only, pause, blocklist, history gate.
+    const result = method === "run_steps"
+      ? await runSteps(message.params || {})
+      : await runTool(method, message.params);
+    connectionManager.send({ id, result });
+  } catch (error) {
+    // Guarded because send() throws when the socket is down, and this is the
+    // last handler — an escape here would lose the original error entirely.
+    try {
+      connectionManager.send({ id, error: { message: error.message, code: -32603 } });
+    } catch (sendError) {
+      console.error('Could not deliver error response:', error.message, '|', sendError.message);
+    }
+  }
+}
+
+// One tool call through the policy (scope, read-only, pause, blocklist,
+// history gate), logged in the popup.
+async function runTool(method, rawParams) {
+  let host = "";
+  try {
     let checked;
     try {
-      checked = await guard.checkCall(method, message.params);
+      checked = await guard.checkCall(method, rawParams);
     } catch (error) {
       if (guard.isRefusal(error)) throw new Error(`claude-for-arc: ${error.message}`);
       throw error;
     }
-    const params = checked.params;
     host = checked.host;
-
-    let result;
-
-    switch (method) {
-      // New automation tools with background tab support
-      case "page_analyze":
-        result = await sendToContentScript('analyze', params, params.tab_id);
-        break;
-      case "page_extract_content":
-        result = await sendToContentScript('extract_content', params, params.tab_id);
-        break;
-      case "element_click":
-        result = await sendToContentScript('element_click', params, params.tab_id);
-        break;
-      case "element_fill":
-        result = await sendToContentScript('element_fill', params, params.tab_id);
-        break;
-      case "page_navigate":
-        result = await navigateToUrl(params.url, params.wait_for, params.timeout, params.tab_id, params.open_new_tab);
-        await guard.rememberCreatedTabs(params.open_new_tab ? result : null);
-        break;
-      case "page_wait_for":
-        result = await sendToContentScript('wait_for', params, params.tab_id);
-        break;
-        
-      // Tab management tools
-      case "tab_create":
-        result = await createTab(params);
-        await guard.rememberCreatedTabs(result);
-        break;
-      case "tab_close":
-        result = await closeTabs(params);
-        break;
-      case "tab_list":
-        result = await listTabs(params);
-        if (checked.filterTabs) {
-          const hiddenCount = result.tabs.filter((tab) => !guard.isAgentTab(tab.id)).length;
-          result.tabs = result.tabs.filter((tab) => guard.isAgentTab(tab.id));
-          result.count = result.tabs.length;
-          result.summary = {
-            total_tabs: result.tabs.length,
-            active_tab: result.tabs.find((tab) => tab.active)?.id || null,
-            hidden_user_tabs: hiddenCount,
-            note: "claude-for-arc: only tabs opened by the agent are listed; the user's own tabs are hidden.",
-          };
-        }
-        break;
-      case "tab_switch":
-        result = await switchToTab(params.tab_id);
-        break;
-        
-      // Element state tools
-      case "element_get_state":
-        result = await sendToContentScript('get_element_state', params, params.tab_id);
-        break;
-      // Workspace and Reference Management Tools
-      case "get_bookmarks":
-        result = await getBookmarks(params);
-        break;
-      case "add_bookmark":
-        result = await addBookmark(params);
-        break;
-      case "get_history":
-        result = await getHistory(params);
-        break;
-      case "get_selected_text":
-        result = await getSelectedText(params);
-        break;
-      case "page_scroll":
-        result = await sendToContentScript('page_scroll', params, params.tab_id);
-        break;
-      case "get_page_links":
-        result = await sendToContentScript('get_page_links', params, params.tab_id);
-        break;
-      case "page_style":
-        result = await sendToContentScript('page_style', params, params.tab_id);
-        break;
-      default:
-        throw new Error(`Unknown method: ${method}`);
-    }
-
+    const result = await executeTool(method, checked.params, checked);
     guard.logCall({ tool: method, host, ok: true });
-    // Send success response
-    connectionManager.send({
-      id,
-      result,
-    });
+    return result;
   } catch (error) {
     guard.logCall({ tool: method, host, ok: false, error: String(error.message).slice(0, 200) });
-    // Send error response. Guarded because send() now throws when the socket
-    // is down, and this is the last handler — an escape here would be an
-    // unhandled rejection that loses the original error entirely.
+    throw error;
+  }
+}
+
+const RUN_STEPS_MAX = 100;
+const TAB_TOOLS = new Set(STEP_TOOLS.filter((t) => t !== "tab_create" && t !== "sleep"));
+
+// claude-for-arc: several actions in one call. Each step goes through the same
+// policy as a single call; the tab carries over from step to step.
+async function runSteps({ steps, stop_on_error = true, tab_id = null }) {
+  if (!Array.isArray(steps) || steps.length === 0) throw new Error("run_steps: steps is empty");
+  if (steps.length > RUN_STEPS_MAX) throw new Error(`run_steps: at most ${RUN_STEPS_MAX} steps per call`);
+  let tab = tab_id ?? null;
+  const report = [];
+  for (const [index, step] of steps.entries()) {
+    const tool = step?.tool;
+    const args = { ...(step?.args || {}) };
+    const started = Date.now();
     try {
-      connectionManager.send({
-        id,
-        error: {
-          message: error.message,
-          code: -32603,
-        },
-      });
-    } catch (sendError) {
-      console.error('Could not deliver error response:', error.message, '|', sendError.message);
+      if (!STEP_TOOLS.includes(tool)) throw new Error(`run_steps: «${tool}» is not a step tool`);
+      let result;
+      if (tool === "sleep") {
+        const ms = Math.min(Math.max(Number(args.ms) || 0, 0), 10000);
+        await new Promise((resolve) => setTimeout(resolve, ms));
+        result = { success: true, slept: ms };
+      } else {
+        if (TAB_TOOLS.has(tool) && args.tab_id == null && tab != null) args.tab_id = tab;
+        result = await runTool(tool, args);
+        const newTab = result?.tab_id ?? result?.tabId ?? result?.tabs?.[0]?.id ?? result?.created_tabs?.[0]?.tab_id;
+        if ((tool === "tab_create" || tool === "page_navigate") && newTab != null) tab = newTab;
+        else if (args.tab_id != null && tool !== "tab_close") tab = args.tab_id;
+      }
+      report.push({ index, tool, ok: true, ms: Date.now() - started, result });
+    } catch (error) {
+      report.push({ index, tool, ok: false, ms: Date.now() - started, error: error.message });
+      if (stop_on_error) break;
     }
+  }
+  return {
+    success: report.every((r) => r.ok) && report.length === steps.length,
+    steps_total: steps.length,
+    steps_run: report.length,
+    tab_id: tab,
+    report,
+  };
+}
+
+async function executeTool(method, params, checked) {
+  let result;
+  switch (method) {
+    case "page_analyze":
+      return sendToContentScript('analyze', params, params.tab_id);
+    case "page_extract_content":
+      return sendToContentScript('extract_content', params, params.tab_id);
+    case "element_click":
+      return sendToContentScript('element_click', params, params.tab_id);
+    case "element_fill":
+      return sendToContentScript('element_fill', params, params.tab_id);
+    case "press_key":
+      return sendToContentScript('press_key', params, params.tab_id);
+    case "page_navigate":
+      result = await navigateToUrl(params.url, params.wait_for, params.timeout, params.tab_id, params.open_new_tab);
+      await guard.rememberCreatedTabs(params.open_new_tab ? result : null);
+      return result;
+    case "page_wait_for":
+      return sendToContentScript('wait_for', params, params.tab_id);
+    case "tab_create":
+      result = await createTab(params);
+      await guard.rememberCreatedTabs(result);
+      return result;
+    case "tab_close":
+      return closeTabs(params);
+    case "tab_list":
+      result = await listTabs(params);
+      if (checked.filterTabs) {
+        const hiddenCount = result.tabs.filter((tab) => !guard.isAgentTab(tab.id)).length;
+        result.tabs = result.tabs.filter((tab) => guard.isAgentTab(tab.id));
+        result.count = result.tabs.length;
+        result.summary = {
+          total_tabs: result.tabs.length,
+          active_tab: result.tabs.find((tab) => tab.active)?.id || null,
+          hidden_user_tabs: hiddenCount,
+          note: "claude-for-arc: only tabs opened by the agent are listed; the user's own tabs are hidden.",
+        };
+      }
+      return result;
+    case "tab_switch":
+      return switchToTab(params.tab_id);
+    case "element_get_state":
+      return sendToContentScript('get_element_state', params, params.tab_id);
+    case "get_bookmarks":
+      return getBookmarks(params);
+    case "add_bookmark":
+      return addBookmark(params);
+    case "get_history":
+      return getHistory(params);
+    case "get_selected_text":
+      return getSelectedText(params);
+    case "page_scroll":
+      return sendToContentScript('page_scroll', params, params.tab_id);
+    case "get_page_links":
+      return sendToContentScript('get_page_links', params, params.tab_id);
+    case "page_style":
+      return sendToContentScript('page_style', params, params.tab_id);
+    default:
+      throw new Error(`Unknown method: ${method}`);
   }
 }
 

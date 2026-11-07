@@ -41,6 +41,8 @@ claude-for-arc даёт приложению Claude на Mac управлять 
 
 Claude попросит разрешение на действия — подтвердите.
 
+**Быстрее:** для повторяющихся дел (разослать 10 сообщений, заполнить несколько форм) Claude может выполнить всё одной серией действий (`run_steps`) вместо десятков отдельных шагов. Обычно он догадывается сам; если нет, попросите: «сделай это одной серией через run_steps».
+
 По умолчанию Claude видит **только вкладки, которые открыл сам**. Ваши вкладки ему не видны. Это можно поменять в окне расширения.
 
 ### Обновление
@@ -123,6 +125,8 @@ Just ask Claude in a chat or in the Code tab, mentioning claude-for-arc or Arc:
 
 Claude asks for permission to act — approve it.
 
+**Faster:** for repetitive jobs (send 10 messages, fill several forms) Claude can run everything as one series of actions (`run_steps`) instead of dozens of separate steps. It usually does so on its own; if not, ask: "do it as one series with run_steps".
+
 By default Claude sees **only the tabs it opened itself**. Your own tabs stay hidden. You can change this in the extension window.
 
 ### Updating
@@ -175,6 +179,7 @@ cd server && npm ci && cd ..
 node --test --test-concurrency=1 server/test/ tests/   # unit + bridge tests
 node tests/worker.e2e.mjs                              # extension worker + server with mocked chrome APIs
 node tests/live-arc.mjs                                # every tool in a real Arc (see the comment in the file)
+node tests/live-speed.mjs                              # 10 messages: one call per action vs run_steps, no double sends
 bash scripts/make-mcpb.sh                              # connector: dist/claude-for-arc.mcpb
 gh release create v<version> dist/claude-for-arc.mcpb  # → .../releases/latest/download/claude-for-arc.mcpb
 ```

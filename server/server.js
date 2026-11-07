@@ -28,7 +28,7 @@ const { formatToolResult, getFallbackTools } = require("./format.js");
 const { deployExtension } = require("./deploy.js");
 
 const SERVER_NAME = "claude-for-arc";
-const SERVER_VERSION = "0.3.7";
+const SERVER_VERSION = "0.4.0";
 
 // Pinned by the "key" in extension/manifest.json.
 const EXTENSION_ID = process.env.CFA_EXTENSION_ID || "dllpmmijlpleaoifjffigbcilgmhjpla";
@@ -46,6 +46,7 @@ const AUTH_TIMEOUT_MS = 5000;
 const STANDBY_RETRY_MS = 3000;
 const TAKEOVER_BACKOFF_MS = 10000;
 const TOOL_TIMEOUT_MS = 60000;
+const RUN_STEPS_TIMEOUT_MS = 10 * 60000;
 const EXTENSION_WAIT_MS = Number(process.env.CFA_EXTENSION_WAIT_MS) || 20000;
 
 function log(...args) {
@@ -333,9 +334,11 @@ async function acquirePort({ takeover }) {
     if (error.code !== "EADDRINUSE") throw error;
     if (takeover && (await requestTakeover())) {
       // The old owner waits TAKEOVER_BACKOFF_MS before it tries the port again,
-      // so a few quick attempts here win the race deterministically.
-      for (let attempt = 0; attempt < 10 && !wss; attempt++) {
-        await new Promise((r) => setTimeout(r, 300));
+      // so quick attempts here win the race; its socket can take a few seconds
+      // to let go of the port (seen with the Claude app's connector), so keep
+      // trying for most of that backoff.
+      for (let attempt = 0; attempt < 32 && !wss; attempt++) {
+        await new Promise((r) => setTimeout(r, 250));
         try {
           wss = await listen();
         } catch (retryError) {
@@ -426,9 +429,11 @@ async function callBrowserTool(name, args) {
   if (!extensionReady()) throw new Error(notConnectedText());
   const id = `${Date.now()}-${++callCounter}`;
   return new Promise((resolve, reject) => {
+    // run_steps may chain many page loads; it gets a longer budget.
+    const budget = name === "run_steps" ? RUN_STEPS_TIMEOUT_MS : TOOL_TIMEOUT_MS;
     const timeout = setTimeout(() => {
-      if (pendingCalls.delete(id)) reject(new Error("Расширение не ответило за 60 секунд"));
-    }, TOOL_TIMEOUT_MS);
+      if (pendingCalls.delete(id)) reject(new Error(`Расширение не ответило за ${budget / 1000} секунд`));
+    }, budget);
     pendingCalls.set(id, { resolve, reject, timeout });
     extensionSocket.send(JSON.stringify({ id, method: name, params: args }));
   });

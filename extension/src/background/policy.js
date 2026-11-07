@@ -37,8 +37,9 @@ export const CONTENT_TOOLS = new Set([
   "page_scroll",
   "get_page_links",
   "page_style",
+  "press_key",
 ]);
-export const WRITE_TOOLS = new Set(["element_click", "element_fill", "page_style", "tab_close", "add_bookmark"]);
+export const WRITE_TOOLS = new Set(["element_click", "element_fill", "press_key", "page_style", "tab_close", "add_bookmark"]);
 export const HISTORY_TOOLS = new Set(["get_history", "get_bookmarks", "add_bookmark"]);
 
 // ---------------------------------------------------------------------------
@@ -111,14 +112,11 @@ export function decorateTools(tools, settings) {
         };
       }
       if (copy.name === "page_navigate") {
-        copy.description =
-          "Navigate a tab to a new http(s) URL. In the default scope this is a tab opened by tab_create; " +
-          "if there is none, a new tab is opened.";
+        copy.description = "Open an http(s) URL in the agent tab (a new one if there is none) and wait for it to load.";
       }
-      if (settings.scope === "own") {
+      if (settings.scope === "own" && (copy.name === "tab_create" || copy.name === "run_steps" || copy.name === "tab_list")) {
         copy.description +=
-          " [claude-for-arc: only tabs opened with tab_create (or pages they opened) are accessible; " +
-          "the user's other tabs are hidden unless they allow all tabs in the extension popup.]";
+          " [Only tabs opened with tab_create (or pages they opened) are accessible; the user's own tabs are hidden.]";
       }
       return copy;
     });

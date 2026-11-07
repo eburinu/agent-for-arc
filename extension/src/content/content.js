@@ -99,6 +99,81 @@ function readableText(element, maxChars = MAX_TEXT_CHARS) {
 // Upper bound per element registry, so a long-lived tab can't grow it forever.
 const MAX_REGISTRY_ENTRIES = 1000;
 
+// claude-for-arc: actions whose element can be named by text / label / selector.
+const TARGETED_ACTIONS = new Set(["element_click", "element_fill", "get_element_state", "press_key"]);
+
+// Resolves once the DOM has been quiet for QUIET_MS, or after maxMs at most.
+const QUIET_MS = 120;
+function settle(maxMs) {
+  if (maxMs <= 0) return Promise.resolve();
+  return new Promise((resolve) => {
+    let quietTimer;
+    const done = () => { observer.disconnect(); clearTimeout(quietTimer); clearTimeout(capTimer); resolve(); };
+    const observer = new MutationObserver(() => { clearTimeout(quietTimer); quietTimer = setTimeout(done, QUIET_MS); });
+    observer.observe(document.documentElement, { subtree: true, childList: true, attributes: true, characterData: true });
+    quietTimer = setTimeout(done, QUIET_MS);
+    const capTimer = setTimeout(done, maxMs);
+  });
+}
+
+const norm = (value) => String(value || "").replace(/\s+/g, " ").trim().toLowerCase();
+
+function isShown(element) {
+  if (!element.isConnected || element.getClientRects().length === 0) return false;
+  const style = getComputedStyle(element);
+  return style.visibility !== "hidden" && style.display !== "none" && Number(style.opacity) !== 0;
+}
+
+const CLICKABLE =
+  'button, a[href], [role="button"], [role="link"], [role="menuitem"], [role="tab"], [role="option"], ' +
+  '[role="checkbox"], [role="switch"], input[type="submit"], input[type="button"], input[type="checkbox"], ' +
+  'input[type="radio"], summary, label, [onclick], [tabindex]:not([tabindex="-1"])';
+const FIELDS =
+  'input:not([type="hidden"]):not([type="submit"]):not([type="button"]):not([type="checkbox"]):not([type="radio"]), ' +
+  'textarea, select, [contenteditable=""], [contenteditable="true"], [role="textbox"], [role="combobox"], [role="searchbox"]';
+
+// How well a candidate's names match the wanted text: 3 exact, 2 prefix, 1 contains.
+function matchScore(names, wanted) {
+  let best = 0;
+  for (const name of names) {
+    const n = norm(name);
+    if (!n) continue;
+    if (n === wanted) return 3;
+    if (n.startsWith(wanted)) best = Math.max(best, 2);
+    else if (n.includes(wanted)) best = Math.max(best, 1);
+  }
+  return best;
+}
+
+function clickableNames(element) {
+  return [
+    element.getAttribute("aria-label"),
+    element.innerText,
+    element.value,
+    element.getAttribute("title"),
+    element.getAttribute("alt"),
+    element.querySelector?.("img[alt]")?.getAttribute("alt"),
+    element.querySelector?.("svg title")?.textContent,
+  ];
+}
+
+function fieldNames(element) {
+  const names = [
+    element.getAttribute("aria-label"),
+    element.getAttribute("placeholder"),
+    element.getAttribute("aria-placeholder"),
+    element.getAttribute("data-placeholder"),
+    element.getAttribute("title"),
+    element.getAttribute("name"),
+    element.id,
+  ];
+  for (const label of element.labels || []) names.push(label.innerText);
+  for (const id of (element.getAttribute("aria-labelledby") || "").split(/\s+/)) {
+    if (id) names.push(document.getElementById(id)?.innerText);
+  }
+  return names;
+}
+
 class BrowserAutomation {
   constructor() {
     this.elementRegistry = new Map();
@@ -128,8 +203,17 @@ class BrowserAutomation {
     const startTime = performance.now();
 
     try {
+      // claude-for-arc: element actions may name the element directly (button
+      // text, field label or placeholder, CSS selector) instead of an id from
+      // page_analyze, which saves a whole round trip per action.
+      if (TARGETED_ACTIONS.has(action) && data && !data.element_id && (data.selector || data.text || data.label)) {
+        data.element_id = this.registerElement(this.findTarget(data, action));
+      }
       let result;
       switch (action) {
+        case "press_key":
+          result = await this.pressKey(data);
+          break;
         case "analyze":
           result = await this.analyzePage(data);
           break;
@@ -1083,7 +1167,7 @@ class BrowserAutomation {
     }
   }
 
-  async clickElement({ element_id, click_type = "left", wait_after = 500 }) {
+  async clickElement({ element_id, click_type = "left", wait_after = 1000 }) {
     const element = this.getElementById(element_id);
     if (!element) {
       throw new Error(`Element not found: ${element_id}`);
@@ -1095,9 +1179,7 @@ class BrowserAutomation {
       throw new Error(`Элемент «${this.getElementName(element)}» выключен (disabled) — клик ничего не сделает`);
     }
 
-    // Scroll element into view
-    element.scrollIntoView({ behavior: "smooth", block: "center" });
-    await new Promise((resolve) => setTimeout(resolve, 200));
+    element.scrollIntoView({ behavior: "instant", block: "center", inline: "nearest" });
 
     // Send exactly what one real mouse click produces. Widgets (menus, and
     // press handlers like React Aria's) act on pointer events and then skip
@@ -1139,7 +1221,9 @@ class BrowserAutomation {
       }
     }
 
-    await new Promise((resolve) => setTimeout(resolve, wait_after));
+    // Wait until the page stops changing (or wait_after ms at most) instead
+    // of a fixed pause.
+    await settle(Number(wait_after) || 0);
 
     return {
       success: true,
@@ -1150,9 +1234,7 @@ class BrowserAutomation {
   }
 
   async ensureProperFocus(element) {
-    // Scroll element into view first
-    element.scrollIntoView({ behavior: "smooth", block: "center" });
-    await new Promise((resolve) => setTimeout(resolve, 200));
+    element.scrollIntoView({ behavior: "instant", block: "center", inline: "nearest" });
 
     // Simulate proper mouse interaction sequence
     const rect = element.getBoundingClientRect();
@@ -1189,13 +1271,16 @@ class BrowserAutomation {
     element.dispatchEvent(new FocusEvent("focusin", { bubbles: true }));
     element.dispatchEvent(new FocusEvent("focus", { bubbles: true }));
 
-    // Wait for React/framework to update
-    await new Promise((resolve) => setTimeout(resolve, 100));
+    // Let the framework attach its handlers.
+    await new Promise((resolve) => setTimeout(resolve, 20));
   }
 
   async clearElementContent(element) {
     if (element.tagName === "INPUT" || element.tagName === "TEXTAREA") {
-      element.value = "";
+      const proto = element.tagName === "INPUT" ? HTMLInputElement.prototype : HTMLTextAreaElement.prototype;
+      const setter = Object.getOwnPropertyDescriptor(proto, "value")?.set;
+      if (setter) setter.call(element, "");
+      else element.value = "";
       element.dispatchEvent(new Event("input", { bubbles: true }));
     } else if (element.contentEditable === "true") {
       // For contenteditable, simulate selecting all and deleting
@@ -1204,13 +1289,16 @@ class BrowserAutomation {
       document.execCommand("delete");
       element.dispatchEvent(new Event("input", { bubbles: true }));
     }
-    await new Promise((resolve) => setTimeout(resolve, 50));
   }
 
   async fillWithEvents(element, value) {
     if (element.tagName === "INPUT" || element.tagName === "TEXTAREA") {
-      // Set value and fire comprehensive events
-      element.value = value;
+      // React and similar libraries track the value through the prototype's
+      // setter; assigning element.value directly leaves their state stale.
+      const proto = element.tagName === "INPUT" ? HTMLInputElement.prototype : HTMLTextAreaElement.prototype;
+      const setter = Object.getOwnPropertyDescriptor(proto, "value")?.set;
+      if (setter) setter.call(element, value);
+      else element.value = value;
       element.dispatchEvent(new Event("beforeinput", { bubbles: true }));
       element.dispatchEvent(new Event("input", { bubbles: true }));
       element.dispatchEvent(new Event("change", { bubbles: true }));
@@ -1240,7 +1328,7 @@ class BrowserAutomation {
       document.dispatchEvent(new Event("selectionchange"));
     }
 
-    await new Promise((resolve) => setTimeout(resolve, 100));
+    await new Promise((resolve) => setTimeout(resolve, 30));
   }
 
   getElementValue(element) {
@@ -1394,6 +1482,99 @@ class BrowserAutomation {
   }
 
   // Utility methods
+  // claude-for-arc: find the element an action names by selector, visible
+  // text (buttons, links) or label / placeholder (fields). Prefers visible,
+  // better-matching and smaller (more specific) elements.
+  findTarget({ selector, text, label, index = 0 }, action) {
+    let candidates;
+    let describe;
+    if (selector) {
+      describe = `selector «${selector}»`;
+      try {
+        candidates = [...document.querySelectorAll(selector)].filter(isShown);
+      } catch (error) {
+        throw new Error(`Неверный CSS-селектор «${selector}»: ${error.message}`);
+      }
+    } else {
+      const wantField = action === "element_fill" || (label && !text);
+      const wanted = norm(text || label);
+      describe = wantField ? `поле «${text || label}»` : `элемент «${text || label}»`;
+      const pool = [...document.querySelectorAll(wantField ? FIELDS : CLICKABLE)].filter(isShown);
+      const scored = pool
+        .map((el) => ({ el, score: matchScore(wantField ? fieldNames(el) : clickableNames(el), wanted) }))
+        .filter((c) => c.score > 0);
+      if (!scored.length && !wantField) {
+        // Clickable things without a role (a styled div): the smallest element
+        // showing exactly that text, or its nearest clickable-looking ancestor.
+        for (const el of document.body.querySelectorAll("*")) {
+          if (el.children.length > 3 || norm(el.innerText) !== wanted || !isShown(el)) continue;
+          let target = el;
+          for (let up = el; up && up !== document.body; up = up.parentElement) {
+            if (up.matches(CLICKABLE) || getComputedStyle(up).cursor === "pointer") { target = up; break; }
+          }
+          scored.push({ el: target, score: 1 });
+        }
+      }
+      scored.sort((a, b) => b.score - a.score || (a.el.innerText || "").length - (b.el.innerText || "").length);
+      candidates = [...new Set(scored.map((c) => c.el))];
+    }
+    const found = candidates[Number(index) || 0];
+    if (!found) {
+      throw new Error(`Не нашёл ${describe} на странице${candidates.length ? ` (совпадений: ${candidates.length}, index ${index})` : ""}. Уточните текст или вызовите page_analyze.`);
+    }
+    return found;
+  }
+
+  // claude-for-arc: one key press on the given element or the focused one.
+  async pressKey({ element_id, key = "Enter", modifiers = [], wait_after = 1000 }) {
+    const KEYS = {
+      Enter: ["Enter", 13], Escape: ["Escape", 27], Tab: ["Tab", 9], Backspace: ["Backspace", 8],
+      Delete: ["Delete", 46], " ": ["Space", 32], ArrowUp: ["ArrowUp", 38], ArrowDown: ["ArrowDown", 40],
+      ArrowLeft: ["ArrowLeft", 37], ArrowRight: ["ArrowRight", 39], Home: ["Home", 36], End: ["End", 35],
+      PageUp: ["PageUp", 33], PageDown: ["PageDown", 34],
+    };
+    const name = key === "Space" ? " " : key === "Esc" ? "Escape" : key;
+    const single = name.length === 1;
+    if (!KEYS[name] && !single) throw new Error(`Клавиша «${key}» не поддерживается`);
+    const [code, keyCode] = KEYS[name] || [`Key${name.toUpperCase()}`, name.toUpperCase().charCodeAt(0)];
+    let target = element_id ? this.getElementById(element_id) : document.activeElement;
+    if (element_id && !target) throw new Error(`Element not found: ${element_id}`);
+    if (!target || target === document.documentElement) target = document.body;
+    if (element_id && typeof target.focus === "function") target.focus({ preventScroll: true });
+    const mods = new Set((Array.isArray(modifiers) ? modifiers : [modifiers]).map((m) => String(m).toLowerCase()));
+    const init = {
+      key: name, code, bubbles: true, cancelable: true, composed: true, view: window,
+      ctrlKey: mods.has("ctrl") || mods.has("control"), metaKey: mods.has("meta") || mods.has("cmd"),
+      shiftKey: mods.has("shift"), altKey: mods.has("alt") || mods.has("option"),
+    };
+    const fire = (type) => {
+      const event = new KeyboardEvent(type, init);
+      // Older handlers read keyCode / which, which an init dict cannot set.
+      Object.defineProperty(event, "keyCode", { get: () => keyCode });
+      Object.defineProperty(event, "which", { get: () => keyCode });
+      return target.dispatchEvent(event);
+    };
+    const notPrevented = fire("keydown");
+    if (notPrevented && (name === "Enter" || single)) fire("keypress");
+    fire("keyup");
+    // A real Enter in a single-line field submits its form; a synthetic one
+    // does not, so do it here unless the page handled the key itself.
+    let submitted = false;
+    if (notPrevented && name === "Enter" && target.tagName === "INPUT" && target.form) {
+      target.form.requestSubmit();
+      submitted = true;
+    }
+    await settle(Number(wait_after) || 0);
+    return {
+      success: true,
+      key: name,
+      element_id: element_id || null,
+      element_name: this.getElementName(target),
+      handled_by_page: !notPrevented,
+      form_submitted: submitted,
+    };
+  }
+
   registerElement(element) {
     const id = `element_${++this.idCounter}`;
     this.elementRegistry.set(id, element);

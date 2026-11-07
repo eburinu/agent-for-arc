@@ -2,7 +2,50 @@
 // (aeonfun/opendia, MIT) so upstream fixes stay easy to port.
 
 // Tool result formatting
+// claude-for-arc: the formatters below come from OpenDia and end every reply
+// with a JSON block of tool name / timing. Claude re-reads each reply on every
+// later step, so that block is dropped, and run_steps gets a compact report.
+const METADATA_TAIL = /\s*\{\s*"tool":[^{}]*\}\s*$/;
+const READ_TOOLS = new Set([
+  "page_analyze", "page_extract_content", "element_get_state", "get_page_links", "tab_list", "get_selected_text",
+]);
+
 function formatToolResult(toolName, result) {
+  if (toolName === "run_steps") return formatRunSteps(result);
+  if (toolName === "press_key") return formatPressKey(result);
+  return formatToolResultVerbose(toolName, result).replace(METADATA_TAIL, "");
+}
+
+function formatPressKey(result) {
+  const on = result.element_name ? ` → ${String(result.element_name).slice(0, 60)}` : "";
+  const extra = result.form_submitted ? " (form submitted)" : result.handled_by_page ? " (handled by the page)" : "";
+  return `✅ Pressed ${result.key}${on}${extra}`;
+}
+
+function formatRunSteps(result) {
+  const lines = [];
+  for (const step of result.report || []) {
+    const head = `${step.ok ? "✓" : "✗"} ${step.index + 1}. ${step.tool} (${(step.ms / 1000).toFixed(1)}s)`;
+    if (!step.ok) {
+      lines.push(`${head}: ${step.error}`);
+      continue;
+    }
+    if (step.tool === "sleep") {
+      lines.push(head);
+      continue;
+    }
+    const text = formatToolResult(step.tool, step.result || {}).trim();
+    if (READ_TOOLS.has(step.tool)) lines.push(`${head}\n${text}`);
+    else lines.push(`${head}: ${text.split("\n")[0].replace(/^✅\s*/, "")}`);
+  }
+  const skipped = (result.steps_total || 0) - (result.steps_run || 0);
+  const status = result.success
+    ? `✅ All ${result.steps_total} steps done`
+    : `❌ Stopped: ${lines.filter((l) => l.startsWith("✗")).length} failed${skipped ? `, ${skipped} not run` : ""}`;
+  return `${status}${result.tab_id != null ? ` · tab ${result.tab_id}` : ""}\n${lines.join("\n")}`;
+}
+
+function formatToolResultVerbose(toolName, result) {
   const metadata = {
     tool: toolName,
     execution_time: result.execution_time || 0,
@@ -196,17 +239,9 @@ function formatContentSummary(summary, contentType) {
   }
 }
 
-function formatElementClickResult(result, metadata) {
-  return (
-    `✅ Successfully clicked element: ${
-      result.element_name || result.element_id
-    }\n` +
-    `Click type: ${result.click_type || "left"}\n\n${JSON.stringify(
-      metadata,
-      null,
-      2
-    )}`
-  );
+function formatElementClickResult(result) {
+  const type = result.click_type && result.click_type !== "left" ? ` (${result.click_type})` : "";
+  return `✅ Clicked${type}: ${String(result.element_name || result.element_id).slice(0, 60)}`;
 }
 
 function formatElementFillResult(result, metadata) {
@@ -222,15 +257,12 @@ function formatElementFillResult(result, metadata) {
   const methodDisplay = methodEmojis[result.method] || result.method;
   const successIcon = result.success ? "✅" : "❌";
 
-  let fillResult = `${successIcon} Element fill ${
-    result.success ? "completed" : "failed"
-  } using ${methodDisplay}\n`;
-  fillResult += `📝 Target: ${result.element_name || result.element_id}\n`;
-  fillResult += `💬 Input: "${result.value}"\n`;
-
-  if (result.actual_value) {
-    fillResult += `📄 Result: "${result.actual_value}"\n`;
-  }
+  const target = String(result.element_name || result.element_id || "").slice(0, 60);
+  const shown = String(result.actual_value ?? result.value ?? "");
+  const value = shown.length > 60 ? `${shown.slice(0, 60)}…` : shown;
+  let fillResult = `${successIcon} ${result.success ? "Filled" : "Fill failed"}: ${target}${result.success ? ` = «${value}»` : ""}${
+    result.success ? "" : ` (field shows "${String(result.actual_value || "").slice(0, 80)}")`
+  }${methodDisplay && result.method !== "standard_fill" ? ` · ${methodDisplay}` : ""}\n`;
 
   // Add bypass-specific information
   if (

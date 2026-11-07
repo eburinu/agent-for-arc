@@ -122,6 +122,38 @@ r = await call("tab_list", {});
 check("pause blocks everything", r.err && /паузу/.test(r.text), r.text);
 await chrome.storage.local.set({ paused: false });
 
+// run_steps: one call, steps carry the tab over, each step is policed.
+pageCalls.length = 0;
+r = await call("run_steps", { steps: [
+  { tool: "page_navigate", args: { url: "https://example.net/chat" } },
+  { tool: "element_fill", args: { label: "Сообщение", value: "привет" } },
+  { tool: "press_key", args: { key: "Enter" } },
+  { tool: "sleep", args: { ms: 10 } },
+] });
+check("run_steps runs every step on the agent tab", !r.err && /All 4 steps done/.test(r.text)
+  && pageCalls.filter((c) => c.id === agentId && c.action !== "ping").map((c) => c.action).join(",") === "element_fill,press_key", JSON.stringify(pageCalls) + r.text);
+
+r = await call("run_steps", { steps: [
+  { tool: "page_analyze", args: { intent_hint: "x", tab_id: 1 } },
+  { tool: "page_analyze", args: { intent_hint: "x" } },
+] });
+check("run_steps: a user tab is refused inside a step and later steps stop", /✗ 1\. page_analyze/.test(r.text) && /открыта пользователем/.test(r.text) && /1 not run/.test(r.text), r.text);
+
+r = await call("run_steps", { steps: [{ tool: "run_steps", args: { steps: [] } }] });
+check("run_steps cannot nest", /not a step tool/.test(r.text), r.text);
+
+await chrome.storage.local.set({ readOnly: true });
+r = await call("run_steps", { steps: [{ tool: "press_key", args: { key: "Enter" } }] });
+check("read-only blocks press_key inside run_steps", /только чтение/.test(r.text), r.text);
+r = await call("press_key", { key: "Enter" });
+check("read-only blocks press_key", r.err && /только чтение/.test(r.text), r.text);
+await chrome.storage.local.set({ readOnly: false });
+
+await chrome.storage.local.set({ paused: true });
+r = await call("run_steps", { steps: [{ tool: "page_analyze", args: { intent_hint: "x" } }] });
+check("pause blocks run_steps", /паузу/.test(r.text), r.text);
+await chrome.storage.local.set({ paused: false });
+
 await chrome.storage.local.set({ scope: "all" });
 pageCalls.length = 0;
 r = await call("page_analyze", { tab_id: 1 });

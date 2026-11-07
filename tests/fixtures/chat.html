@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <title>Тестовый мессенджер</title>
+  <style>
+    body { font: 15px system-ui, sans-serif; margin: 0; display: flex; height: 100vh; }
+    nav { width: 220px; border-right: 1px solid #ddd; overflow: auto; }
+    nav a { display: block; padding: 10px 14px; color: #222; text-decoration: none; }
+    main { flex: 1; display: flex; flex-direction: column; }
+    #log { flex: 1; overflow: auto; padding: 14px; }
+    .msg { background: #e8f1ff; border-radius: 10px; padding: 6px 10px; margin: 4px 0; width: fit-content; }
+    form { display: flex; gap: 8px; padding: 10px; border-top: 1px solid #ddd; }
+    textarea { flex: 1; height: 40px; }
+    .send { background: #0a7cff; color: #fff; border-radius: 8px; padding: 0 16px; display: flex; align-items: center; cursor: pointer; user-select: none; }
+  </style>
+</head>
+<body>
+  <nav id="chats"></nav>
+  <main>
+    <h2 id="title" style="margin: 10px 14px"></h2>
+    <p id="total" style="margin: 0 14px; color: #666"></p>
+    <div id="log"></div>
+    <form onsubmit="return false">
+      <textarea id="box" placeholder="Написать сообщение…"></textarea>
+      <!-- A div "button" that counts presses like press-handling libraries do:
+           on pointerup, plus a click without a pointer behind it as a press of its own. -->
+      <div class="send" id="send" role="button" tabindex="0" aria-label="Отправить">Отправить</div>
+    </form>
+  </main>
+  <script>
+    const query = new URLSearchParams(location.search);
+    const chat = Number(query.get("c") || 1);
+    if (query.get("reset")) localStorage.removeItem("sent");
+    const names = ["Анна", "Борис", "Вера", "Глеб", "Дина", "Егор", "Жанна", "Зоя", "Илья", "Кира"];
+    const nav = document.getElementById("chats");
+    names.forEach((n, i) => {
+      const a = document.createElement("a");
+      a.href = `chat.html?c=${i + 1}`;
+      a.textContent = n;
+      nav.append(a);
+    });
+    document.getElementById("title").textContent = names[chat - 1];
+    const box = document.getElementById("box");
+    const log = document.getElementById("log");
+    const load = () => JSON.parse(localStorage.getItem("sent") || "[]");
+    const render = () => {
+      const all = load();
+      const perChat = names.map((_, i) => all.filter((m) => m.chat === i + 1).length);
+      document.getElementById("total").textContent = `Всего отправлено: ${all.length} · по чатам: ${perChat.join(",")}`;
+      log.replaceChildren(...load().filter((m) => m.chat === chat).map((m) => {
+        const d = document.createElement("div"); d.className = "msg"; d.textContent = m.text; return d;
+      }));
+    };
+    const send = () => {
+      const text = box.value.trim();
+      if (!text) return;
+      localStorage.setItem("sent", JSON.stringify([...load(), { chat, text }]));
+      box.value = "";
+      render();
+    };
+    // Like a real chat app, the send happens a moment after the press.
+    const sendSoon = () => setTimeout(send, 30);
+    const button = document.getElementById("send");
+    button.addEventListener("pointerup", (e) => { if (e.button === 0) sendSoon(); });
+    button.addEventListener("click", (e) => { if (e.detail === 0) sendSoon(); });
+    box.addEventListener("keydown", (e) => {
+      if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendSoon(); }
+    });
+    render();
+  </script>
+</body>
+</html>
