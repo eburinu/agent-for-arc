@@ -17,7 +17,7 @@ node --test --test-concurrency=1 server/test/ tests/ >/dev/null && node tests/wo
 
 mkdir -p "$STAGE/server" "$STAGE/scripts" "$OUT"
 git archive HEAD extension | tar -x -C "$STAGE"
-git archive HEAD server/server.js server/format.js server/package.json server/package-lock.json | tar -x -C "$STAGE"
+git archive HEAD server/server.js server/format.js server/deploy.js server/package.json server/package-lock.json | tar -x -C "$STAGE"
 git archive HEAD scripts/install.sh scripts/uninstall.sh scripts/doctor.sh scripts/desktop-config.js | tar -x -C "$STAGE"
 git archive HEAD README.md LICENSE | tar -x -C "$STAGE"
 (cd "$STAGE/server" && npm ci --omit=dev --ignore-scripts --no-audit --no-fund --loglevel=error)

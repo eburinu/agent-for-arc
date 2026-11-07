@@ -5,9 +5,9 @@ const $ = (id) => document.getElementById(id);
 const STATUS = {
   connected: ["Подключено к Claude", ""],
   connecting: ["Подключаюсь…", ""],
-  offline: ["Сервер не запущен", "Сервер работает, только пока в приложении Claude открыта сессия во вкладке Code. Начните новую сессию (открытые до установки не подойдут) — расширение подключится само. Не помогло: bash ~/claude-for-arc/scripts/doctor.sh в Терминале."],
-  nokey: ["Нужен ключ подключения", "Вставьте ключ из установщика ниже."],
-  badkey: ["Неверный ключ", "Ключ не совпадает с ключом сервера. Скопируйте его заново из установщика."],
+  offline: ["Сервер не запущен", "Откройте приложение Claude: коннектор claude-for-arc запускается вместе с ним, и расширение подключится само. Коннектора нет — скачайте claude-for-arc.mcpb и откройте его двойным кликом."],
+  nokey: ["Нужен ключ подключения", "Откройте это окно ещё раз — расширение создаст ключ."],
+  badkey: ["Ключи не совпадают", "Перезапустите Claude — коннектор заново положит ключ в папку расширения. Если ставили через install.sh: вставьте ключ вручную ниже."],
 };
 
 async function loadSettings() {
@@ -137,6 +137,7 @@ async function init() {
 
   chrome.storage.onChanged.addListener((changes, area) => {
     if (area === "session" && changes.log) renderLog();
+    if (area === "local" && changes.token) renderKey(changes.token.newValue);
   });
 
   refreshStatus();

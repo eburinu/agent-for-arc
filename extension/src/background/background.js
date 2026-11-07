@@ -79,7 +79,9 @@ class ConnectionManager {
 
   async createConnection() {
     await guard.ready;
+    await guard.adoptBundledKey();
     const { token, port } = guard.getSettings();
+    this.activeToken = token;
     if (!/^[0-9a-f]{64}$/.test(token || "")) {
       this.setState("nokey");
       throw new Error("Нет ключа подключения");
@@ -143,6 +145,11 @@ class ConnectionManager {
         }
 
         if (message.type === "pong") return;
+        if (message.type === "reload") {
+          // The server placed a newer version in this extension's folder.
+          chrome.runtime.reload();
+          return;
+        }
         if (typeof message.id === "string" && typeof message.method === "string") {
           await handleMCPRequest(message);
         }
@@ -177,7 +184,7 @@ class ConnectionManager {
 
   register() {
     const tools = guard.decorateTools(getAvailableTools(), guard.getSettings());
-    this.mcpSocket.send(JSON.stringify({ type: "register", tools }));
+    this.mcpSocket.send(JSON.stringify({ type: "register", tools, version: chrome.runtime.getManifest().version }));
   }
 
   // Re-advertise tools after a settings change (history toggle, scope).
@@ -2027,7 +2034,9 @@ chrome.runtime.onInstalled.addListener(tryConnect);
 
 chrome.storage.onChanged.addListener((changes, area) => {
   if (area !== "local") return;
-  if (changes.token || changes.port) {
+  // A key adopted from key.json by the connection being set up is not a
+  // reason to tear that connection down.
+  if (changes.port || (changes.token && changes.token.newValue !== connectionManager.activeToken)) {
     connectionManager.closeSocket();
     tryConnect();
   } else if (changes.allowHistory || changes.scope) {

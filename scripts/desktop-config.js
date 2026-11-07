@@ -15,6 +15,20 @@ const NAME = "claude-for-arc";
 const FILE = path.join(os.homedir(), "Library", "Application Support", "Claude", "claude_desktop_config.json");
 const [action, node, server] = process.argv.slice(2);
 
+// The app keeps this file in memory and writes it back when it quits, so an
+// edit made while it runs is silently lost.
+const { execFileSync } = require("child_process");
+function claudeRunning() {
+  try {
+    return execFileSync("ps", ["-axo", "comm="], { encoding: "utf8" })
+      .split("\n").some((line) => line.trim() === "/Applications/Claude.app/Contents/MacOS/Claude");
+  } catch { return false; }
+}
+if ((action === "add" || action === "remove") && claudeRunning() && !process.env.CFA_FORCE) {
+  console.error("Приложение Claude открыто: оно перезапишет настройки при выходе. Закройте его (⌘Q) и повторите.");
+  process.exit(3);
+}
+
 let config = {};
 let existed = false;
 try {

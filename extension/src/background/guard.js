@@ -58,6 +58,25 @@ chrome.storage.onChanged.addListener((changes, area) => {
   }
 });
 
+// key.json is written into this extension's folder by the claude-for-arc
+// connector (server/deploy.js). Checked before every connection so a new key
+// is picked up without the user doing anything.
+export async function adoptBundledKey() {
+  let token;
+  try {
+    const response = await fetch(chrome.runtime.getURL("key.json"), { cache: "no-store" });
+    if (!response.ok) return;
+    ({ token } = await response.json());
+  } catch {
+    return; // no key.json: installed another way, the popup key is used
+  }
+  token = String(token || "").toLowerCase();
+  if (/^[0-9a-f]{64}$/.test(token) && token !== settings.token) {
+    settings.token = token;
+    await chrome.storage.local.set({ token });
+  }
+}
+
 export function getSettings() {
   return settings;
 }

@@ -141,3 +141,5 @@ opendia-extension/releases/
 .yarn/build-state.yml
 .yarn/install-state.gz
 .pnp.*
+# Connection key written into the deployed extension
+extension/key.json

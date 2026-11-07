@@ -99,15 +99,17 @@
   <section id="keySection">
     <h2>Ключ подключения</h2>
     <div id="keySaved" hidden>
-      <span class="saved">Ключ сохранён</span>
-      <button id="changeKey">Заменить</button>
-    </div>
-    <div id="keyForm">
       <div class="row">
-        <input type="password" id="token" placeholder="64 символа из установщика" autocomplete="off" spellcheck="false">
+        <span class="saved">Ключ на месте</span>
+        <button id="changeKey">Ввести вручную</button>
+      </div>
+    </div>
+    <div id="keyForm" hidden>
+      <div class="row">
+        <input type="password" id="token" placeholder="64 символа" autocomplete="off" spellcheck="false">
         <button class="primary" id="saveToken">Сохранить</button>
       </div>
-      <p class="hint">Установщик скопировал ключ в буфер обмена. Его также можно посмотреть командой <code>cat ~/Library/Application\ Support/claude-for-arc/token</code>.</p>
+      <p class="hint">Обычно ключ приходит от коннектора claude-for-arc сам. Вручную — только для установки через install.sh: <code>cat ~/Library/Application\ Support/claude-for-arc/token</code>.</p>
     </div>
   </section>
 

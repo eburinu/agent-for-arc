@@ -72,6 +72,8 @@ else
 fi
 chmod 600 "$DATA/token"
 TOKEN="$(tr -d '\n' < "$DATA/token")"
+# The extension picks the key up from its own folder; no pasting needed.
+(umask 077; printf '{"token":"%s"}\n' "$TOKEN" > "$DEST/extension/key.json")
 
 # The server must start and answer an MCP handshake before Claude is told about it.
 SMOKE_PORT=$(( 49152 + RANDOM % 10000 ))
@@ -101,7 +103,8 @@ if ask "Подключить ещё и к обычному чату Claude (вк
     say "Приложение Claude открыто — оно может перезаписать настройки чата."
     pause "Закройте Claude полностью (⌘Q) и нажмите Enter… "
   fi
-  "$NODE" "$DEST/scripts/desktop-config.js" add "$NODE" "$DEST/server/server.js"
+  "$NODE" "$DEST/scripts/desktop-config.js" add "$NODE" "$DEST/server/server.js" \
+    || say "Чат не подключён. Закройте Claude (⌘Q) и запустите установщик снова."
 fi
 
 step "5/5 Расширение в Arc"
@@ -112,9 +115,7 @@ say "   Сейчас откроется Finder с этой папкой — её
 open -R "$DEST/extension" 2>/dev/null || true
 pause "Нажмите Enter, когда расширение появится в Arc… "
 
-printf '%s' "$TOKEN" | pbcopy
-say "3. Ключ подключения скопирован в буфер обмена. Нажмите на значок claude-for-arc"
-say "   в панели расширений Arc, вставьте ключ (⌘V) и нажмите «Сохранить»."
+say "3. Ключ подключения уже лежит в папке расширения, вставлять его не нужно."
 say "4. Начните НОВУЮ сессию во вкладке Code приложения Claude — появятся инструменты"
 say "   claude-for-arc, а расширение покажет «Подключено». Сессии, открытые до установки,"
 say "   сервер не запускают."

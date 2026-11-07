@@ -30,9 +30,9 @@ const hmac = (token, ...parts) =>
 const nonce = () => crypto.randomBytes(32).toString("hex");
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-function startServer() {
+function startServer(extraEnv = {}) {
   const child = spawn(process.execPath, [SERVER], {
-    env: { ...process.env, CFA_DATA_DIR: DATA_DIR, CFA_PORT: String(PORT), CFA_EXTENSION_WAIT_MS: "300" },
+    env: { ...process.env, CFA_DATA_DIR: DATA_DIR, CFA_PORT: String(PORT), CFA_EXTENSION_WAIT_MS: "300", ...extraEnv },
     stdio: ["pipe", "pipe", "pipe"],
   });
   children.push(child);
@@ -77,7 +77,7 @@ function startServer() {
 
 // Connects like the extension does; resolves with the socket after the
 // mutual handshake, or with the close code if the server refused.
-function connectExtension({ token = TOKEN, origin = EXTENSION_ORIGIN, tools = [], onCall } = {}) {
+function connectExtension({ token = TOKEN, origin = EXTENSION_ORIGIN, tools = [], onCall, version, onMessage } = {}) {
   return new Promise((resolve) => {
     const ws = new WebSocket(`ws://127.0.0.1:${PORT}`, origin ? { origin } : {});
     let clientNonce;
@@ -93,8 +93,10 @@ function connectExtension({ token = TOKEN, origin = EXTENSION_ORIGIN, tools = []
         }));
       } else if (msg.type === "auth_ok") {
         ws.serverProved = msg.mac === hmac(token, "server", clientNonce, ws.serverNonce);
-        ws.send(JSON.stringify({ type: "register", tools }));
+        ws.send(JSON.stringify({ type: "register", tools, version }));
         resolve({ ws });
+      } else if (onMessage && !msg.id) {
+        onMessage(msg);
       } else if (msg.id && onCall) {
         onCall(msg, ws);
       }
@@ -199,4 +201,70 @@ test("an impostor on the port cannot make the server step aside", async () => {
   impostor.close();
   await server.waitFor("Listening on ws://", 10000);
   server.child.kill();
+});
+
+test("key from the connector settings (CFA_TOKEN) wins and is written to the key file", async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "cfa-test-env-"));
+  const fileKey = crypto.randomBytes(32).toString("hex");
+  fs.writeFileSync(path.join(dir, "token"), fileKey + "\n", { mode: 0o600 });
+  try {
+    // An unfilled setting arrives as the literal placeholder: the file key stays.
+    const placeholder = startServer({ CFA_DATA_DIR: dir, CFA_TOKEN: "${user_config.token}", CFA_PORT: String(PORT + 1) });
+    await placeholder.waitFor("using the key file instead");
+    placeholder.child.kill("SIGKILL");
+    assert.equal(fs.readFileSync(path.join(dir, "token"), "utf8").trim(), fileKey);
+
+    const envKey = crypto.randomBytes(32).toString("hex");
+    const server = startServer({ CFA_DATA_DIR: dir, CFA_TOKEN: envKey.toUpperCase(), CFA_PORT: String(PORT + 1) });
+    await server.rpc("initialize", {});
+    assert.equal(fs.readFileSync(path.join(dir, "token"), "utf8").trim(), envKey);
+    assert.equal(fs.statSync(path.join(dir, "token")).mode & 0o777, 0o600);
+    server.child.kill("SIGKILL");
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("connector mode: places the extension with its key and asks an old one to reload once", async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "cfa-test-deploy-"));
+  const target = path.join(dir, "extension");
+  const env = { CFA_DEPLOY_EXTENSION: "1", CFA_EXTENSION_DIR: target, CFA_NO_OPEN: "1" };
+  const bundled = JSON.parse(fs.readFileSync(path.join(__dirname, "..", "..", "extension", "manifest.json"), "utf8")).version;
+  try {
+    const server = startServer(env);
+    await server.waitFor("Listening on");
+    await server.waitFor(`Extension ${bundled} placed in ${target}`);
+    assert.ok(fs.existsSync(path.join(target, "src", "background", "background.js")));
+    const keyFile = path.join(target, "key.json");
+    assert.deepEqual(JSON.parse(fs.readFileSync(keyFile, "utf8")), { token: TOKEN });
+    assert.equal(fs.statSync(keyFile).mode & 0o777, 0o600);
+    assert.equal(fs.readdirSync(dir).length, 1, "no staging folder left behind");
+
+    const messages = [];
+    const old = await connectExtension({ version: "0.0.1", onMessage: (m) => messages.push(m) });
+    await server.waitFor("asking it to reload");
+    await sleep(200);
+    assert.deepEqual(messages.filter((m) => m.type === "reload").length, 1);
+    old.ws.close();
+
+    // A second old registration in the same run does not trigger another reload.
+    const again = [];
+    const second = await connectExtension({ version: "0.0.1", onMessage: (m) => again.push(m) });
+    await sleep(300);
+    assert.equal(again.filter((m) => m.type === "reload").length, 0);
+    second.ws.close();
+    server.child.kill("SIGKILL");
+    await sleep(200);
+
+    // Same version on disk: nothing is copied again, and the call says where the folder is.
+    const quiet = startServer({ ...env, CFA_EXTENSION_WAIT_MS: "200" });
+    await quiet.waitFor("Listening on");
+    assert.ok(!quiet.stderr().includes("placed in"));
+    await quiet.rpc("initialize", {});
+    const call = await quiet.rpc("tools/call", { name: "tab_list", arguments: {} });
+    assert.match(JSON.stringify(call), new RegExp(target.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+    quiet.child.kill("SIGKILL");
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
 });
