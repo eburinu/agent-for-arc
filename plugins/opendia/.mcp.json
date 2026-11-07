@@ -1,8 +1,0 @@
-{
-  "mcpServers": {
-    "opendia": {
-      "command": "npx",
-      "args": ["-y", "opendia"]
-    }
-  }
-}
