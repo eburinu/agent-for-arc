@@ -24,7 +24,7 @@ main() {
   SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
   CHAT_CONFIG="$HOME/Library/Application Support/Claude/claude_desktop_config.json"
   if [ -n "$NODE" ] && [ -f "$SCRIPT_DIR/desktop-config.js" ] && grep -qs "\"$NAME\"" "$CHAT_CONFIG"; then
-    if pgrep -xq Claude; then say "Закройте Claude (⌘Q), чтобы он не вернул настройки чата обратно."; read -r -p "Нажмите Enter… " _ || true; fi
+    if ps -axo comm= | grep -x "/Applications/Claude.app/Contents/MacOS/Claude" >/dev/null; then say "Закройте Claude (⌘Q), чтобы он не вернул настройки чата обратно."; read -r -p "Нажмите Enter… " _ || true; fi
     "$NODE" "$SCRIPT_DIR/desktop-config.js" remove || true
   fi
 

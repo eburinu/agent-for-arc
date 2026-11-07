@@ -49,7 +49,7 @@ if [ "$SRC" != "$DEST" ]; then
   mkdir -p "$DEST/scripts"
   rsync -a --delete "$SRC/extension/" "$DEST/extension/"
   rsync -a --delete --exclude test/ "$SRC/server/" "$DEST/server/"
-  cp "$SRC/scripts/uninstall.sh" "$SRC/scripts/desktop-config.js" "$DEST/scripts/"
+  cp "$SRC/scripts/uninstall.sh" "$SRC/scripts/doctor.sh" "$SRC/scripts/desktop-config.js" "$DEST/scripts/"
   cp "$SRC/LICENSE" "$SRC/README.md" "$DEST/"
 fi
 touch "$DEST/.claude-for-arc"
@@ -97,7 +97,7 @@ else
 fi
 
 if ask "Подключить ещё и к обычному чату Claude (вкладка Chat)?"; then
-  if pgrep -xq Claude; then
+  if ps -axo comm= | grep -x "/Applications/Claude.app/Contents/MacOS/Claude" >/dev/null; then
     say "Приложение Claude открыто — оно может перезаписать настройки чата."
     pause "Закройте Claude полностью (⌘Q) и нажмите Enter… "
   fi
@@ -115,6 +115,10 @@ pause "Нажмите Enter, когда расширение появится в
 printf '%s' "$TOKEN" | pbcopy
 say "3. Ключ подключения скопирован в буфер обмена. Нажмите на значок claude-for-arc"
 say "   в панели расширений Arc, вставьте ключ (⌘V) и нажмите «Сохранить»."
-say "4. Начните новую сессию в Claude — появятся инструменты claude-for-arc."
+say "4. Начните НОВУЮ сессию во вкладке Code приложения Claude — появятся инструменты"
+say "   claude-for-arc, а расширение покажет «Подключено». Сессии, открытые до установки,"
+say "   сервер не запускают."
+say ""
+say "Если расширение пишет «Сервер не запущен»: bash \"$DEST/scripts/doctor.sh\""
 say ""
 say "Удаление: bash \"$DEST/scripts/uninstall.sh\""
