@@ -28,7 +28,7 @@ const { formatToolResult, getFallbackTools } = require("./format.js");
 const { deployExtension } = require("./deploy.js");
 
 const SERVER_NAME = "claude-for-arc";
-const SERVER_VERSION = "0.3.4";
+const SERVER_VERSION = "0.3.5";
 
 // Pinned by the "key" in extension/manifest.json.
 const EXTENSION_ID = process.env.CFA_EXTENSION_ID || "dllpmmijlpleaoifjffigbcilgmhjpla";
