@@ -19,7 +19,7 @@ done
 
 mkdir -p "$STAGE/server" "$OUT"
 cp mcpb/manifest.json LICENSE "$STAGE/"
-cp extension/icons/icon-128.png "$STAGE/icon.png"
+cp mcpb/icon.png "$STAGE/icon.png"
 cp server/server.js server/format.js server/deploy.js server/package.json server/package-lock.json "$STAGE/server/"
 git archive HEAD extension | tar -x -C "$STAGE"
 rm -f "$STAGE/extension/key.json"
