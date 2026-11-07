@@ -73,6 +73,7 @@ bash ~/claude-for-arc/scripts/uninstall.sh
 cd server && npm ci && cd ..
 node --test --test-concurrency=1 server/test/ tests/   # тесты
 node tests/worker.e2e.mjs                              # расширение + сервер вместе
+node tests/live-arc.mjs                                # все инструменты в настоящем Arc (см. комментарий в файле)
 bash scripts/install.sh                                # установка из репозитория
 bash scripts/make-release.sh                           # архив dist/claude-for-arc-<версия>.zip
 ```

@@ -27,7 +27,7 @@ const path = require("path");
 const { formatToolResult, getFallbackTools } = require("./format.js");
 
 const SERVER_NAME = "claude-for-arc";
-const SERVER_VERSION = "0.1.0";
+const SERVER_VERSION = "0.1.1";
 
 // Pinned by the "key" in extension/manifest.json.
 const EXTENSION_ID = process.env.CFA_EXTENSION_ID || "dllpmmijlpleaoifjffigbcilgmhjpla";
@@ -45,7 +45,7 @@ const AUTH_TIMEOUT_MS = 5000;
 const STANDBY_RETRY_MS = 3000;
 const TAKEOVER_BACKOFF_MS = 10000;
 const TOOL_TIMEOUT_MS = 60000;
-const EXTENSION_WAIT_MS = Number(process.env.CFA_EXTENSION_WAIT_MS) || 10000;
+const EXTENSION_WAIT_MS = Number(process.env.CFA_EXTENSION_WAIT_MS) || 20000;
 
 function log(...args) {
   // stdout is the MCP channel; everything human-readable goes to stderr.
