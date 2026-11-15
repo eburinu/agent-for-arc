@@ -6,9 +6,40 @@
 
 ## Русский
 
-Управляйте браузером **Arc из приложения Claude на Mac**: просите Claude открывать и читать страницы, нажимать кнопки и заполнять формы. Работает в Claude (обычные чаты и Code) и в локальных чатах Codex.
+Управляйте **Arc из Claude или Codex на Mac**.
 
-**Перейти к установке:** [Claude](#установка-в-claude) · [Codex](#установка-в-codex)
+**Перейти к установке:** [Codex](#установка-в-codex) · [Claude](#установка-в-claude)
+
+### Установка в Codex
+
+Нужны Mac, Arc и приложение Codex. Выберите один вариант. Пока репозиторий закрыт, воспользуйтесь инструкцией для приватного доступа ниже.
+
+**Вариант 1. Вставьте в локальный чат Codex**
+
+```text
+Установи claude-for-arc для Codex на этом Mac из последнего релиза https://github.com/eburinu/claude-for-arc/releases/latest.
+Скачай claude-for-arc-codex.zip и файл .sha256, сверь контрольную сумму, распакуй архив и запусти install.sh.
+Покажи, что нужно сделать в Arc при первой установке, и напомни перезапустить Codex.
+```
+
+**Вариант 2. Вставьте одну строку в Терминал**
+
+```bash
+( d=$(mktemp -d) && cd "$d" && u=https://github.com/eburinu/claude-for-arc/releases/latest/download && curl -fsSL -O "$u/claude-for-arc-codex.zip" -O "$u/claude-for-arc-codex.zip.sha256" && shasum -a 256 -c claude-for-arc-codex.zip.sha256 && ditto -x -k claude-for-arc-codex.zip . && bash claude-for-arc-codex/install.sh )
+```
+
+При первой установке в Arc включите **Developer mode**, нажмите **Load unpacked** и выберите папку из Finder. Если расширение уже установлено, пропустите этот шаг. Перезапустите Codex и в новом чате попросите: «Через Arc открой example.com и прочитай заголовок».
+
+<details>
+<summary>Установка, пока репозиторий приватный</summary>
+
+Войдите в GitHub с аккаунта, которому дали доступ. [Скачайте ZIP](https://github.com/eburinu/claude-for-arc/releases/latest/download/claude-for-arc-codex.zip), распакуйте его в «Загрузки» и выполните команду ниже.
+
+```bash
+bash "$HOME/Downloads/claude-for-arc-codex/install.sh"
+```
+
+</details>
 
 ### Установка в Claude
 
@@ -21,20 +52,6 @@
 **Готово.** Нажмите значок расширения в Arc: статус должен быть **«Подключено к Claude»**. Больше ничего настраивать не нужно. Ключ подключения добавляется автоматически.
 
 Нужно: Mac, Arc, приложение [Claude для Mac](https://claude.ai/download) и доступ к этому репозиторию. Если ссылка на скачивание показывает 404, войдите в GitHub или попросите владельца выдать доступ.
-
-### Установка в Codex
-
-**[Скачать для Codex (.zip)](https://github.com/eburinu/claude-for-arc/releases/latest/download/claude-for-arc-codex.zip)**
-
-Распакуйте архив в «Загрузки» и вставьте в Терминал одну команду:
-
-```bash
-bash "$HOME/Downloads/claude-for-arc-codex/install.sh"
-```
-
-Если расширение ещё не установлено, в Arc нажмите **Developer mode → Load unpacked** и выберите папку, которую покажет Finder. Если уже подключали Arc к Claude, используйте то же расширение.
-
-Перезапустите Codex, откройте новый локальный чат и напишите: «Через Arc открой example.com и прочитай заголовок». В **Settings → MCP servers** подключение называется `arc`.
 
 ### Как пользоваться
 
@@ -50,7 +67,7 @@ bash "$HOME/Downloads/claude-for-arc-codex/install.sh"
 
 ### Обновление
 
-Скачайте файл по той же ссылке и откройте его. Claude обновит коннектор и расширение в Arc. Для Codex скачайте новый архив и повторите команду установки.
+Скачайте файл по той же ссылке и откройте его. Claude обновит коннектор и расширение в Arc. Для Codex повторите установку одним из способов выше.
 
 ### Если не подключается
 
@@ -91,9 +108,40 @@ bash "$HOME/Downloads/claude-for-arc-codex/install.sh"
 
 ## English
 
-Use the Claude app on your Mac to control **Arc**: ask Claude to open and read pages, click buttons and fill forms. Works in Claude (chat and Code) and in local Codex chats.
+Control **Arc from Claude or Codex on your Mac**.
 
-**Jump to setup:** [Claude](#install-in-claude) · [Codex](#install-in-codex)
+**Jump to setup:** [Codex](#install-in-codex) · [Claude](#install-in-claude)
+
+### Install in Codex
+
+You need a Mac, Arc, and the Codex app. Choose either option. While the repository is private, follow the private access instructions below.
+
+**Option 1. Paste into a local Codex chat**
+
+```text
+Install claude-for-arc for Codex on this Mac from the latest release at https://github.com/eburinu/claude-for-arc/releases/latest.
+Download claude-for-arc-codex.zip and its .sha256 file, verify the checksum, extract the archive, and run install.sh.
+Show me the first-time step in Arc and remind me to restart Codex.
+```
+
+**Option 2. Paste one line into Terminal**
+
+```bash
+( d=$(mktemp -d) && cd "$d" && u=https://github.com/eburinu/claude-for-arc/releases/latest/download && curl -fsSL -O "$u/claude-for-arc-codex.zip" -O "$u/claude-for-arc-codex.zip.sha256" && shasum -a 256 -c claude-for-arc-codex.zip.sha256 && ditto -x -k claude-for-arc-codex.zip . && bash claude-for-arc-codex/install.sh )
+```
+
+For a first-time install, turn on **Developer mode** in Arc, click **Load unpacked**, and select the folder Finder opens. If the extension is already installed, skip that step. Restart Codex and ask in a new chat: "Open example.com in Arc and read its heading."
+
+<details>
+<summary>Installing while the repository is private</summary>
+
+Sign in to GitHub with an account that has access. [Download the ZIP](https://github.com/eburinu/claude-for-arc/releases/latest/download/claude-for-arc-codex.zip), extract it to Downloads, and run the command below.
+
+```bash
+bash "$HOME/Downloads/claude-for-arc-codex/install.sh"
+```
+
+</details>
 
 ### Install in Claude
 
@@ -106,20 +154,6 @@ Use the Claude app on your Mac to control **Arc**: ask Claude to open and read p
 **Done.** Click the extension icon in Arc; its status should say **Connected to Claude**. No other setup is needed. The connection key is added automatically.
 
 You need a Mac, Arc, the [Claude app for Mac](https://claude.ai/download), and access to this repository. If the download link shows 404, sign in to GitHub or ask the owner for access.
-
-### Install in Codex
-
-**[Download for Codex (.zip)](https://github.com/eburinu/claude-for-arc/releases/latest/download/claude-for-arc-codex.zip)**
-
-Unzip the archive in Downloads and paste one command into Terminal:
-
-```bash
-bash "$HOME/Downloads/claude-for-arc-codex/install.sh"
-```
-
-If the Arc extension is new, choose **Developer mode → Load unpacked** in Arc and select the folder shown in Finder. If you already use Arc with Claude, keep that extension.
-
-Restart Codex, open a new local chat, and ask: "Open example.com in Arc and read its heading." The connection is called `arc` in **Settings → MCP servers**.
 
 ### How to use
 
@@ -135,7 +169,7 @@ By default Claude sees **only the tabs it opened itself**. Your own tabs stay hi
 
 ### Updating
 
-Download the file from the same link and open it. Claude updates the connector and Arc extension. For Codex, download the new archive and run the same install command.
+Download the file from the same link and open it. Claude updates the connector and Arc extension. For Codex, repeat either install option above.
 
 ### If it won't connect
 
