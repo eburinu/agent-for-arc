@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="138" height="48" viewBox="0 0 138 48" role="img" aria-label="Codex">
+  <rect x=".5" y=".5" width="137" height="47" rx="12" fill="#151515" stroke="#777777"/>
+  <path d="M1.5 3l4.5 4.5L1.5 12M8 12h5" transform="translate(19 16)" fill="none" stroke="#FAFAFA" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/>
+  <text x="48" y="30" fill="#FAFAFA" font-family="system-ui, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif" font-size="18" font-weight="650">Codex</text>
+</svg>
