@@ -91,7 +91,9 @@ function install() {
     fs.rmSync(next, { recursive: true, force: true });
   }
   if (!existing) {
-    const envArgs = process.env.CFA_DATA_DIR ? ["--env", `CFA_DATA_DIR=${data}`] : [];
+    // Arc's extension worker may reconnect on its next 30-second alarm.
+    const envArgs = ["--env", "CFA_EXTENSION_WAIT_MS=45000"];
+    if (process.env.CFA_DATA_DIR) envArgs.push("--env", `CFA_DATA_DIR=${data}`);
     run(codex, ["mcp", "add", NAME, ...envArgs, "--", "/bin/bash", launcher]);
   }
 
