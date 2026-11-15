@@ -6,50 +6,53 @@
 
 ## Русский
 
-claude-for-arc даёт приложению Claude на Mac управлять браузером **Arc**: открывать вкладки, читать страницы, нажимать кнопки и заполнять формы. Работает и в обычных чатах, и во вкладке Code.
+Управляйте браузером **Arc из приложения Claude на Mac**: просите Claude открывать и читать страницы, нажимать кнопки и заполнять формы. Работает в Claude (обычные чаты и Code) и в локальных чатах Codex.
 
-Официальное расширение Claude in Chrome в Arc не работает, поэтому и сделано это.
+**Перейти к установке:** [Claude](#установка-в-claude) · [Codex](#установка-в-codex)
 
-### Что нужно
+### Установка в Claude
 
-- Mac;
-- браузер [Arc](https://arc.net);
-- приложение [Claude](https://claude.ai/download) для Mac;
-- доступ к этому репозиторию на GitHub (если ссылка ниже открывает «404», попросите владельца добавить вас и войдите в GitHub).
+**Скачайте коннектор и откройте его. Затем один раз разрешите расширение в Arc.**
 
-Больше ничего ставить не нужно.
+1. Нажмите **[Скачать claude-for-arc](https://github.com/eburinu/claude-for-arc/releases/latest/download/claude-for-arc.mcpb)**.
+2. Откройте скачанный `.mcpb` двойным щелчком. В Claude нажмите **«Установить»**.
+3. В открывшемся Arc включите **Developer mode** → **Load unpacked** и выберите папку `extension`, которую откроет Finder (`~/claude-for-arc/extension`).
 
-### Установка (2 минуты)
+**Готово.** Нажмите значок расширения в Arc: статус должен быть **«Подключено к Claude»**. Больше ничего настраивать не нужно. Ключ подключения добавляется автоматически.
 
-1. **Скачайте коннектор:** [claude-for-arc.mcpb](https://github.com/eburinu/claude-for-arc/releases/latest/download/claude-for-arc.mcpb)
-2. **Откройте скачанный файл** двойным кликом. Откроется Claude с окном установки — нажмите **«Установить»**.
-3. Сразу после этого сам откроется Arc со страницей расширений, а Finder покажет папку `extension`. В Arc:
-   - включите **«Режим разработчика»** (Developer mode) — переключатель справа вверху;
-   - нажмите **«Загрузить распакованное»** (Load unpacked) и выберите папку `extension` из Finder (путь: `~/claude-for-arc/extension`).
+Нужно: Mac, Arc, приложение [Claude для Mac](https://claude.ai/download) и доступ к этому репозиторию. Если ссылка на скачивание показывает 404, войдите в GitHub или попросите владельца выдать доступ.
 
-Готово. Значок claude-for-arc появится на панели расширений Arc. Нажмите на него: там должно быть **«Подключено к Claude»**. Переключатель EN / RU справа вверху меняет язык.
+### Установка в Codex
 
-> Ключ подключения копировать не нужно: коннектор сам кладёт его в папку расширения.
+**[Скачать для Codex (.zip)](https://github.com/eburinu/claude-for-arc/releases/latest/download/claude-for-arc-codex.zip)**
+
+Распакуйте архив в «Загрузки» и вставьте в Терминал одну команду:
+
+```bash
+bash "$HOME/Downloads/claude-for-arc-codex/install.sh"
+```
+
+Если расширение ещё не установлено, в Arc нажмите **Developer mode → Load unpacked** и выберите папку, которую покажет Finder. Если уже подключали Arc к Claude, используйте то же расширение.
+
+Перезапустите Codex, откройте новый локальный чат и напишите: «Через Arc открой example.com и прочитай заголовок». В **Settings → MCP servers** подключение называется `arc`.
 
 ### Как пользоваться
 
-Просто попросите Claude в чате или во вкладке Code, упомянув claude-for-arc или Arc:
+Попросите Claude или Codex выполнить действие в Arc:
 
 - «Через claude-for-arc открой example.com и перескажи, что там»
 - «Открой в Arc сайт погоды и скажи, будет ли завтра дождь»
 - «Найди в Arc на Авито велосипеды до 20 000 ₽ и пришли 5 ссылок»
 
-Claude попросит разрешение на действия — подтвердите.
-
-**Быстрее:** для повторяющихся дел (разослать 10 сообщений, заполнить несколько форм) Claude может выполнить всё одной серией действий (`run_steps`) вместо десятков отдельных шагов. Обычно он догадывается сам; если нет, попросите: «сделай это одной серией через run_steps».
+Для серии однотипных действий попросите: «Выполни это одной серией». Если пользуетесь и Claude, и Codex, обновите коннектор Claude до 0.5.0, чтобы чаты не прерывали уже начатую работу в Arc.
 
 По умолчанию Claude видит **только вкладки, которые открыл сам**. Ваши вкладки ему не видны. Это можно поменять в окне расширения.
 
 ### Обновление
 
-Скачайте файл по той же ссылке и откройте его. Claude обновит коннектор, а расширение в Arc обновится и перезапустится само.
+Скачайте файл по той же ссылке и откройте его. Claude обновит коннектор и расширение в Arc. Для Codex скачайте новый архив и повторите команду установки.
 
-### Если что-то не так
+### Если не подключается
 
 | Что видно | Что сделать |
 |---|---|
@@ -59,7 +62,7 @@ Claude попросит разрешение на действия — подт�
 | Ссылка на коннектор открывает 404 | Войдите в GitHub. Если не помогло — у вас нет доступа к репозиторию, попросите владельца. |
 | На каком-то сайте не срабатывает клик | Бывает на сайтах со сложными формами или защитой от ботов. Попросите Claude попробовать по-другому или сделайте этот шаг сами. |
 
-### Безопасность
+### Настройки и безопасность
 
 - Всё работает только на вашем Mac. Сервер и расширение общаются через `127.0.0.1` и перед любой командой проверяют друг друга по секретному ключу. Сайты, другие расширения и чужие программы подключиться не могут.
 - Поля паролей, одноразовых кодов и данных карт Claude **не читает и не заполняет**.
@@ -76,13 +79,11 @@ Claude попросит разрешение на действия — подт�
 | Запрещённые сайты | менеджеры паролей | Эти сайты Claude не открывает и не читает |
 | Пауза | выкл | Мгновенно запрещает любые действия |
 
-Там же журнал последних действий Claude.
-
-Ограничение: программа, запущенная на вашем Mac от вашего имени, может прочитать ключ. От вредоносных программ на самом компьютере это не защищает (как и браузер в целом).
+В окне расширения также доступен журнал действий. Программы, запущенные на вашем Mac от вашего имени, могут прочитать ключ подключения.
 
 ### Удаление
 
-1. В Claude: настройки → расширения (Settings → Extensions) → claude-for-arc → удалить.
+1. В Claude удалите claude-for-arc в настройках расширений. В Codex удалите `arc` в **Settings → MCP servers**.
 2. В Arc: `arc://extensions` → claude-for-arc → «Удалить».
 3. Удалите папки `~/claude-for-arc` и `~/Library/Application Support/claude-for-arc`.
 
@@ -90,50 +91,53 @@ Claude попросит разрешение на действия — подт�
 
 ## English
 
-claude-for-arc lets the Claude app on your Mac drive the **Arc** browser: open tabs, read pages, click buttons and fill in forms. It works in regular chats and in the Code tab.
+Use the Claude app on your Mac to control **Arc**: ask Claude to open and read pages, click buttons and fill forms. Works in Claude (chat and Code) and in local Codex chats.
 
-The official Claude in Chrome extension does not work in Arc, which is why this exists.
+**Jump to setup:** [Claude](#install-in-claude) · [Codex](#install-in-codex)
 
-### What you need
+### Install in Claude
 
-- a Mac;
-- the [Arc](https://arc.net) browser;
-- the [Claude](https://claude.ai/download) app for Mac;
-- access to this GitHub repository (if the link below shows "404", ask the owner to add you and sign in to GitHub).
+**Download and open the connector. Then allow the extension in Arc once.**
 
-Nothing else to install.
+1. Click **[Download claude-for-arc](https://github.com/eburinu/claude-for-arc/releases/latest/download/claude-for-arc.mcpb)**.
+2. Double-click the downloaded `.mcpb`. In Claude, click **Install**.
+3. In Arc, which opens automatically, enable **Developer mode** → **Load unpacked** and choose the `extension` folder opened by Finder (`~/claude-for-arc/extension`).
 
-### Install (2 minutes)
+**Done.** Click the extension icon in Arc; its status should say **Connected to Claude**. No other setup is needed. The connection key is added automatically.
 
-1. **Download the connector:** [claude-for-arc.mcpb](https://github.com/eburinu/claude-for-arc/releases/latest/download/claude-for-arc.mcpb)
-2. **Double-click the downloaded file.** Claude opens an install window — click **Install**.
-3. Right after that Arc opens its extensions page and Finder shows the `extension` folder. In Arc:
-   - turn on **Developer mode** (switch in the top right);
-   - click **Load unpacked** and pick the `extension` folder from Finder (path: `~/claude-for-arc/extension`).
+You need a Mac, Arc, the [Claude app for Mac](https://claude.ai/download), and access to this repository. If the download link shows 404, sign in to GitHub or ask the owner for access.
 
-Done. The claude-for-arc icon appears in Arc's extensions bar. Click it: it should say "Connected to Claude". The EN / RU switch in the top right changes the language.
+### Install in Codex
 
-> You don't need to copy any key: the connector puts it into the extension folder for you.
+**[Download for Codex (.zip)](https://github.com/eburinu/claude-for-arc/releases/latest/download/claude-for-arc-codex.zip)**
+
+Unzip the archive in Downloads and paste one command into Terminal:
+
+```bash
+bash "$HOME/Downloads/claude-for-arc-codex/install.sh"
+```
+
+If the Arc extension is new, choose **Developer mode → Load unpacked** in Arc and select the folder shown in Finder. If you already use Arc with Claude, keep that extension.
+
+Restart Codex, open a new local chat, and ask: "Open example.com in Arc and read its heading." The connection is called `arc` in **Settings → MCP servers**.
 
 ### How to use
 
-Just ask Claude in a chat or in the Code tab, mentioning claude-for-arc or Arc:
+Ask Claude or Codex to do something in Arc:
 
 - "Using claude-for-arc, open example.com and summarize it"
 - "Open a weather site in Arc and tell me if it will rain tomorrow"
 - "In Arc, find used bikes under $200 on Craigslist and send me 5 links"
 
-Claude asks for permission to act — approve it.
-
-**Faster:** for repetitive jobs (send 10 messages, fill several forms) Claude can run everything as one series of actions (`run_steps`) instead of dozens of separate steps. It usually does so on its own; if not, ask: "do it as one series with run_steps".
+For repeated actions, ask: "Do this as one sequence." If you use both Claude and Codex, update the Claude connector to 0.5.0 so chats leave in-progress Arc actions alone.
 
 By default Claude sees **only the tabs it opened itself**. Your own tabs stay hidden. You can change this in the extension window.
 
 ### Updating
 
-Download the file from the same link and open it. Claude updates the connector, and the Arc extension updates and restarts on its own.
+Download the file from the same link and open it. Claude updates the connector and Arc extension. For Codex, download the new archive and run the same install command.
 
-### Troubleshooting
+### If it won't connect
 
 | What you see | What to do |
 |---|---|
@@ -143,7 +147,7 @@ Download the file from the same link and open it. Claude updates the connector, 
 | The connector link shows 404 | Sign in to GitHub. If that doesn't help, you have no access to the repository — ask the owner. |
 | A click doesn't work on some site | Happens on sites with complex forms or bot protection. Ask Claude to try another way or do that step yourself. |
 
-### Security
+### Settings and security
 
 - Everything stays on your Mac. The server and the extension talk over `127.0.0.1` and prove a shared secret key to each other before any command. Websites, other extensions and other programs cannot connect.
 - Claude **never reads or fills** password, one-time code or card fields.
@@ -160,13 +164,11 @@ Settings in the extension window:
 | Blocked sites | password managers | Claude never opens or reads these sites |
 | Pause | off | Instantly blocks every action |
 
-The same window shows a log of Claude's recent actions.
-
-Limitation: a program running on your Mac as you can read the key. This does not protect against malware on the computer itself (neither does the browser).
+The extension window also shows an activity log. Programs running on your Mac as you can read the connection key.
 
 ### Uninstall
 
-1. In Claude: Settings → Extensions → claude-for-arc → uninstall.
+1. In Claude, uninstall claude-for-arc in Settings → Extensions. In Codex, remove `arc` in **Settings → MCP servers**.
 2. In Arc: `arc://extensions` → claude-for-arc → Remove.
 3. Delete the folders `~/claude-for-arc` and `~/Library/Application Support/claude-for-arc`.
 
@@ -181,7 +183,8 @@ node tests/worker.e2e.mjs                              # extension worker + serv
 node tests/live-arc.mjs                                # every tool in a real Arc (see the comment in the file)
 node tests/live-speed.mjs                              # 10 messages: one call per action vs run_steps, no double sends
 bash scripts/make-mcpb.sh                              # connector: dist/claude-for-arc.mcpb
-gh release create v<version> dist/claude-for-arc.mcpb  # → .../releases/latest/download/claude-for-arc.mcpb
+bash scripts/make-codex.sh  # dist/claude-for-arc-codex.zip
+gh release create v<version> dist/claude-for-arc.mcpb dist/claude-for-arc-codex.zip
 ```
 
 Versions in `extension/manifest.json`, `server/package.json` and `mcpb/manifest.json` must match; bump them for every release so the extension folder gets refreshed.

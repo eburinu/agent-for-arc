@@ -177,6 +177,37 @@ test("a session that only starts up waits; the one that calls a tool takes the b
   newer.child.kill();
 });
 
+test("another session cannot interrupt run_steps", async () => {
+  const owner = startServer();
+  await owner.waitFor("Listening on");
+  const calls = [];
+  const { ws } = await connectExtension({
+    onCall(msg, sock) { calls.push({ msg, sock }); },
+  });
+  const running = owner.rpc("tools/call", { name: "run_steps", arguments: {} });
+  while (calls.length === 0) {
+    const ready = await Promise.race([running.then(() => false), sleep(25).then(() => true)]);
+    assert.ok(ready, "the extension should receive the call");
+  }
+
+  const waiting = startServer();
+  await waiting.waitFor("standby until a tool is called");
+  const busy = await waiting.rpc("tools/call", { name: "tab_list", arguments: {} });
+  assert.equal(busy.result.isError, true);
+  assert.match(busy.result.content[0].text, /Arc is busy in another chat/);
+  assert.ok(!owner.stderr().includes("moving to standby"));
+
+  const { msg, sock } = calls[0];
+  sock.send(JSON.stringify({ id: msg.id, result: { success: true, steps_run: 1, report: [] } }));
+  assert.equal((await running).result.isError, false);
+
+  await waiting.rpc("tools/call", { name: "tab_list", arguments: {} });
+  await waiting.waitFor("Took over");
+  ws.close();
+  owner.child.kill();
+  waiting.child.kill();
+});
+
 test("when the owner exits, a waiting session picks the port up", async () => {
   const first = startServer();
   await first.waitFor("Listening on");

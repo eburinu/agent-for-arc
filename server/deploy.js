@@ -42,6 +42,15 @@ function chooseTarget(dataDir) {
   return path.join(dataDir, "extension");
 }
 
+function isNewer(candidate, installed) {
+  const versions = [candidate, installed].map((value) => value.split(".").map(Number));
+  for (let i = 0; i < Math.max(...versions.map((parts) => parts.length)); i++) {
+    const diff = (versions[0][i] || 0) - (versions[1][i] || 0);
+    if (diff) return diff > 0;
+  }
+  return false;
+}
+
 function writeKey(target, token) {
   const file = path.join(target, "key.json");
   const body = JSON.stringify({ token }) + "\n";
@@ -67,7 +76,8 @@ function deployExtension({ token, dataDir, log }) {
   const target = chooseTarget(dataDir);
   const installed = readVersion(target);
   const fresh = installed === null;
-  const updated = installed !== version;
+  const updated = fresh ||
+    (process.env.CFA_KEEP_INSTALLED_EXTENSION !== "1" && isNewer(version, installed));
   if (updated) {
     // Copy next to the target, then swap, so Arc never sees a half-written folder.
     const staging = `${target}.new-${process.pid}`;
@@ -86,7 +96,7 @@ function deployExtension({ token, dataDir, log }) {
     execFile("open", ["-a", "Arc", "arc://extensions"], () => {});
     execFile("open", ["-R", target], () => {});
   }
-  return { target, version, fresh, updated };
+  return { target, version: updated ? version : installed, fresh, updated };
 }
 
 module.exports = { deployExtension };
