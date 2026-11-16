@@ -219,6 +219,9 @@ Older install path without the connector (needs Node.js 18+, Claude Code only by
 
 ## Credits / Благодарности
 
+Agent for Arc is developed and maintained by [Ivan Belov (@eburinu)](https://github.com/eburinu).
+Agent for Arc разрабатывает и поддерживает [Иван Белов (@eburinu)](https://github.com/eburinu).
+
 Based on [OpenDia](https://github.com/aeonfun/opendia) by Aeon Inc (MIT), reworked with a focus on security.
 Основано на [OpenDia](https://github.com/aeonfun/opendia) от Aeon Inc (MIT), переработано с упором на безопасность.
 
