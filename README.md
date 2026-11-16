@@ -6,13 +6,15 @@
 
 ## Русский
 
-Управляйте **Arc из Claude или Codex на Mac**.
+Управляйте **Arc из Claude на Mac**.
+
+> **Codex.** В релизе есть экспериментальный установщик MCP. Полноценная адаптация под Codex и проверка работы в браузере ещё впереди.
 
 [![Claude: скачать коннектор](docs/assets/install-claude.svg)](https://github.com/eburinu/agent-for-arc/releases/latest/download/claude-for-arc.mcpb) [![Codex: промпт и команда](docs/assets/install-codex.svg)](#установка-в-codex)
 
 ### Установка в Codex
 
-Нужны Mac, Arc и приложение Codex. Выберите один вариант. Пока репозиторий закрыт, воспользуйтесь инструкцией для приватного доступа ниже.
+Нужны Mac, Arc и приложение Codex. Выберите один вариант, чтобы попробовать экспериментальную интеграцию.
 
 **Вариант 1. Вставьте в локальный чат Codex**
 
@@ -30,17 +32,6 @@
 
 При первой установке в Arc включите **Developer mode**, нажмите **Load unpacked** и выберите папку из Finder. Если расширение уже установлено, пропустите этот шаг. Перезапустите Codex и в новом чате попросите: «Через Arc открой example.com и прочитай заголовок».
 
-<details>
-<summary>Установка, пока репозиторий приватный</summary>
-
-Войдите в GitHub с аккаунта, которому дали доступ. [Скачайте ZIP](https://github.com/eburinu/agent-for-arc/releases/latest/download/claude-for-arc-codex.zip), распакуйте его в «Загрузки» и выполните команду ниже.
-
-```bash
-bash "$HOME/Downloads/claude-for-arc-codex/install.sh"
-```
-
-</details>
-
 ### Установка в Claude
 
 **Скачайте коннектор и откройте его. Затем один раз разрешите расширение в Arc.**
@@ -51,11 +42,11 @@ bash "$HOME/Downloads/claude-for-arc-codex/install.sh"
 
 **Готово.** Нажмите значок расширения в Arc: статус должен быть **«Подключено к Claude»**. Больше ничего настраивать не нужно. Ключ подключения добавляется автоматически.
 
-Нужно: Mac, Arc, приложение [Claude для Mac](https://claude.ai/download) и доступ к этому репозиторию. Если ссылка на скачивание показывает 404, войдите в GitHub или попросите владельца выдать доступ.
+Для установки нужны Mac, Arc и приложение [Claude для Mac](https://claude.ai/download).
 
 ### Как пользоваться
 
-Попросите Claude или Codex выполнить действие в Arc:
+Попросите Claude выполнить действие в Arc:
 
 - «Через claude-for-arc открой example.com и перескажи, что там»
 - «Открой в Arc сайт погоды и скажи, будет ли завтра дождь»
@@ -76,7 +67,7 @@ bash "$HOME/Downloads/claude-for-arc-codex/install.sh"
 | В окне расширения «Сервер не запущен» | Откройте приложение Claude: коннектор работает, пока оно открыто. Проверьте, что claude-for-arc включён в настройках Claude, в разделе расширений (Settings → Extensions). |
 | «Ключи не совпадают» | Закройте Claude (⌘Q) и откройте снова, потом в Arc на странице `arc://extensions` нажмите ↻ у claude-for-arc. |
 | Claude пытается открыть Chrome вместо Arc | Откажитесь и напишите прямо: «через claude-for-arc …». |
-| Ссылка на коннектор открывает 404 | Войдите в GitHub. Если не помогло — у вас нет доступа к репозиторию, попросите владельца. |
+| Ссылка на коннектор открывает 404 | Откройте [последний релиз](https://github.com/eburinu/agent-for-arc/releases/latest) и скачайте коннектор из списка файлов. |
 | На каком-то сайте не срабатывает клик | Бывает на сайтах со сложными формами или защитой от ботов. Попросите Claude попробовать по-другому или сделайте этот шаг сами. |
 
 ### Настройки и безопасность
@@ -108,13 +99,15 @@ bash "$HOME/Downloads/claude-for-arc-codex/install.sh"
 
 ## English
 
-Control **Arc from Claude or Codex on your Mac**.
+Control **Arc from Claude on your Mac**.
+
+> **Codex.** The release includes an experimental MCP installer. Full Codex support and end-to-end browser testing are planned.
 
 [![Claude: download connector](docs/assets/install-claude.svg)](https://github.com/eburinu/agent-for-arc/releases/latest/download/claude-for-arc.mcpb) [![Codex: prompt and terminal command](docs/assets/install-codex.svg)](#install-in-codex)
 
 ### Install in Codex
 
-You need a Mac, Arc, and the Codex app. Choose either option. While the repository is private, follow the private access instructions below.
+You need a Mac, Arc, and the Codex app. Choose either option to try the experimental integration.
 
 **Option 1. Paste into a local Codex chat**
 
@@ -132,17 +125,6 @@ Show me the first-time step in Arc and remind me to restart Codex.
 
 For a first-time install, turn on **Developer mode** in Arc, click **Load unpacked**, and select the folder Finder opens. If the extension is already installed, skip that step. Restart Codex and ask in a new chat: "Open example.com in Arc and read its heading."
 
-<details>
-<summary>Installing while the repository is private</summary>
-
-Sign in to GitHub with an account that has access. [Download the ZIP](https://github.com/eburinu/agent-for-arc/releases/latest/download/claude-for-arc-codex.zip), extract it to Downloads, and run the command below.
-
-```bash
-bash "$HOME/Downloads/claude-for-arc-codex/install.sh"
-```
-
-</details>
-
 ### Install in Claude
 
 **Download and open the connector. Then allow the extension in Arc once.**
@@ -153,11 +135,11 @@ bash "$HOME/Downloads/claude-for-arc-codex/install.sh"
 
 **Done.** Click the extension icon in Arc; its status should say **Connected to Claude**. No other setup is needed. The connection key is added automatically.
 
-You need a Mac, Arc, the [Claude app for Mac](https://claude.ai/download), and access to this repository. If the download link shows 404, sign in to GitHub or ask the owner for access.
+You need a Mac, Arc, and the [Claude app for Mac](https://claude.ai/download).
 
 ### How to use
 
-Ask Claude or Codex to do something in Arc:
+Ask Claude to do something in Arc:
 
 - "Using claude-for-arc, open example.com and summarize it"
 - "Open a weather site in Arc and tell me if it will rain tomorrow"
@@ -178,7 +160,7 @@ Download the file from the same link and open it. Claude updates the connector a
 | The extension says the server is not running | Open the Claude app: the connector runs while it is open. Check that claude-for-arc is enabled in Claude's Settings → Extensions. |
 | Keys don't match | Quit Claude (⌘Q) and open it again, then click ↻ on claude-for-arc at `arc://extensions` in Arc. |
 | Claude tries to open Chrome instead of Arc | Decline and say it directly: "using claude-for-arc, …". |
-| The connector link shows 404 | Sign in to GitHub. If that doesn't help, you have no access to the repository — ask the owner. |
+| The connector link shows 404 | Open the [latest release](https://github.com/eburinu/agent-for-arc/releases/latest) and download the connector from its assets. |
 | A click doesn't work on some site | Happens on sites with complex forms or bot protection. Ask Claude to try another way or do that step yourself. |
 
 ### Settings and security
