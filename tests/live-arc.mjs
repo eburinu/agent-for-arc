@@ -71,6 +71,7 @@ check("tab_list shows only the agent tab", !r.err && r.text.includes(String(tabI
 // --- reading
 r = await call("page_extract_content", { content_type: "article", summarize: false, tab_id: tabId });
 check("extraction returns visible text", r.text.includes("VISIBLE_MARKER"), r.text);
+check("full extraction reaches the end of a short article over 500 characters", r.text.includes("LONG_TEXT_END"), r.text);
 check("extraction has no CSS, script source, hidden text or password value",
   !/CSS_MARKER|SCRIPT_MARKER|HIDDEN_MARKER|SECRET_VALUE/.test(r.text), r.text);
 
@@ -138,6 +139,42 @@ check("page_style resets", !r.err, r.text);
 
 r = await call("get_selected_text", { tab_id: tabId });
 check("get_selected_text answers", !r.err, r.text);
+await call("element_click", { selector: "#select-long-text", tab_id: tabId });
+r = await call("get_selected_text", { tab_id: tabId, max_length: 1000 });
+check("get_selected_text preserves text past 200 characters", !r.err && r.text.includes("LONG_TEXT_END"), r.text);
+
+// --- browser-native form controls
+r = await call("element_click", { selector: "#attachment", tab_id: tabId });
+check("system file picker reports the manual or byte-based alternatives", r.err && /element_fill\(file\)/.test(r.text), r.text);
+r = await call("element_fill", { selector: "#attachment", value: "/tmp/fixture.txt", tab_id: tabId });
+check("a local path cannot be passed as a file", r.err && /element_fill\(file\)/.test(r.text), r.text);
+r = await call("element_fill", { selector: "#attachment", tab_id: tabId, file: { name: "fixture.txt", base64: "!!!" } });
+check("invalid file bytes return a clear error", r.err && /base64/.test(r.text), r.text);
+r = await call("element_fill", {
+  selector: "#attachment", tab_id: tabId,
+  file: { name: "fixture.txt", base64: Buffer.from("BYTES_FROM_MCP").toString("base64"), mime_type: "text/plain" },
+});
+check("file attachment reports the attached filename", !r.err && /Filled:.*fixture\.txt/.test(r.text), r.text);
+r = await call("page_wait_for", { tab_id: tabId, condition_type: "text_present", text: "fixture.txt: BYTES_FROM_MCP" });
+check("site receives the bytes through the file input change event", !r.err, r.text);
+
+r = await call("element_fill", { selector: "#records", value: "Text record", tab_id: tabId });
+check("select by option label", !r.err && /Filled:.*«txt»/.test(r.text), r.text);
+r = await call("element_click", { selector: '#records option[value="a"]', tab_id: tabId });
+check("click by native option selector", !r.err && /Clicked: Address/.test(r.text), r.text);
+r = await call("element_get_state", { selector: "#records", tab_id: tabId });
+check("native option click updates the current value", /Current Value.*"a"/.test(r.text), r.text);
+await call("press_key", { selector: "#records", key: "ArrowDown", tab_id: tabId });
+r = await call("element_get_state", { selector: "#records", tab_id: tabId });
+check("ArrowDown skips a disabled native option", /Current Value.*"txt"/.test(r.text), r.text);
+
+for (const [index, wait_after] of [1000, 0].entries()) {
+  r = await call("run_steps", { tab_id: tabId, steps: [
+    { tool: "element_click", args: { selector: "#reload", wait_after } },
+    { tool: "page_wait_for", args: { condition_type: "text_present", text: `RELOAD_CONFIRMED:${index + 1}`, timeout: 3000 } },
+  ] });
+  check(`click-initiated reload keeps the batch working (wait_after=${wait_after})`, !r.err && /All 2 steps done/.test(r.text), r.text);
+}
 
 // --- navigation waits for the new page
 r = await call("page_navigate", { url: PAGE + "?fresh=1", tab_id: tabId });

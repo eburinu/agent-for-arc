@@ -101,6 +101,9 @@ const MAX_REGISTRY_ENTRIES = 1000;
 
 // claude-for-arc: actions whose element can be named by text / label / selector.
 const TARGETED_ACTIONS = new Set(["element_click", "element_fill", "get_element_state", "press_key"]);
+const MAX_FILE_BYTES = 1024 * 1024;
+const FILE_PICKER_INSTRUCTIONS =
+  "Системный диалог выбора файла открывает пользователь. Для автоматического заполнения передайте имя и содержимое через element_fill(file).";
 
 // Resolves once the DOM has been quiet for QUIET_MS, or after maxMs at most.
 const QUIET_MS = 120;
@@ -122,6 +125,17 @@ function isShown(element) {
   if (!element.isConnected || element.getClientRects().length === 0) return false;
   const style = getComputedStyle(element);
   return style.visibility !== "hidden" && style.display !== "none" && Number(style.opacity) !== 0;
+}
+
+function nativeOptionIsShown(option) {
+  const select = option.closest("select");
+  if (!select || !isShown(select) || option.closest("[hidden]")) return false;
+  const style = getComputedStyle(option);
+  return style.display !== "none" && style.visibility !== "hidden";
+}
+
+function nativeOptionIsEnabled(option) {
+  return !option.disabled && !option.closest("optgroup[disabled]");
 }
 
 const CLICKABLE =
@@ -293,12 +307,24 @@ class BrowserAutomation {
   async fillElementWithAntiDetection({
     element_id,
     value,
+    file,
     clear_first = true,
     force_focus = true,
   }) {
     const element = this.getElementById(element_id);
     if (!element) {
       throw new Error(`Element not found: ${element_id}`);
+    }
+
+    if (element.matches('input[type="file"]')) {
+      if (file == null || value !== undefined) throw new Error(FILE_PICKER_INSTRUCTIONS);
+      return this.attachFile(element, element_id, file);
+    }
+    if (file !== undefined || typeof value !== "string") {
+      throw new Error("Для этого поля передайте строку в value. Параметр file доступен только для input[type=file].");
+    }
+    if (element.tagName === "SELECT") {
+      return this.fillNativeSelect(element, element_id, value);
     }
 
     const hostname = window.location.hostname;
@@ -324,6 +350,70 @@ class BrowserAutomation {
         force_focus,
       });
     }
+  }
+
+  attachFile(input, elementId, { name, base64, mime_type: mimeType }) {
+    if (this.isElementDisabled(input)) throw new Error("Поле выбора файла выключено.");
+    if (typeof name !== "string" || !name.trim() || name.length > 255 ||
+        name === "." || name === ".." || /[\/\\\x00-\x1f\x7f]/.test(name)) {
+      throw new Error("Укажите имя файла без пути.");
+    }
+    if (typeof base64 !== "string" || base64.length > 4 * Math.ceil(MAX_FILE_BYTES / 3)) {
+      throw new Error("Передайте содержимое файла в base64. Максимальный размер файла 1 МиБ.");
+    }
+    if (mimeType !== undefined && (typeof mimeType !== "string" || mimeType.length > 127)) {
+      throw new Error("Некорректный MIME-тип файла.");
+    }
+    let decoded;
+    try {
+      decoded = atob(base64);
+    } catch {
+      throw new Error("Некорректное содержимое base64.");
+    }
+    if (decoded.length > MAX_FILE_BYTES) throw new Error("Максимальный размер файла 1 МиБ.");
+    const bytes = Uint8Array.from(decoded, char => char.charCodeAt(0));
+    const transfer = new DataTransfer();
+    transfer.items.add(new File([bytes], name, { type: mimeType }));
+    input.files = transfer.files;
+    if (input.files.length !== 1 || input.files[0].name !== name) {
+      throw new Error("Не удалось прикрепить файл к полю.");
+    }
+    // A site can clear the field in its change handler after consuming the file.
+    this.dispatchValueChange(input);
+    return {
+      success: true,
+      element_id: elementId,
+      element_name: this.getElementName(input),
+      actual_value: name,
+      method: "file_attachment",
+    };
+  }
+
+  fillNativeSelect(select, elementId, value) {
+    if (this.isElementDisabled(select)) throw new Error("Выпадающий список выключен.");
+    const options = [...select.options].filter(option => nativeOptionIsEnabled(option) && nativeOptionIsShown(option));
+    const option = options.find(candidate => candidate.value === value) ||
+      options.find(candidate => norm(candidate.label) === norm(value));
+    if (!option) throw new Error("В списке нет доступного варианта с таким значением или названием.");
+    this.selectNativeOption(select, option);
+    return {
+      success: select.selectedIndex === option.index,
+      element_id: elementId,
+      element_name: this.getElementName(select),
+      actual_value: select.value,
+      method: "native_select",
+    };
+  }
+
+  dispatchValueChange(element) {
+    element.dispatchEvent(new Event("input", { bubbles: true, composed: true }));
+    element.dispatchEvent(new Event("change", { bubbles: true }));
+  }
+
+  selectNativeOption(select, option) {
+    if (select.selectedIndex === option.index && select.selectedOptions.length === 1) return;
+    select.selectedIndex = option.index;
+    this.dispatchValueChange(select);
   }
 
   detectAntiDetectionPlatform(hostname) {
@@ -1173,6 +1263,24 @@ class BrowserAutomation {
       throw new Error(`Element not found: ${element_id}`);
     }
 
+    if (click_type !== "right" &&
+        (element.matches('input[type="file"]') || element.control?.matches('input[type="file"]'))) {
+      throw new Error(FILE_PICKER_INSTRUCTIONS);
+    }
+    if (element.tagName === "OPTION") {
+      const select = element.closest("select");
+      if (click_type !== "left") throw new Error("Для выбора варианта используйте левый клик.");
+      if (!nativeOptionIsShown(element) || !nativeOptionIsEnabled(element) || this.isElementDisabled(select)) {
+        throw new Error("Вариант выпадающего списка недоступен.");
+      }
+      select.scrollIntoView({ behavior: "instant", block: "center", inline: "nearest" });
+      select.focus({ preventScroll: true });
+      this.selectNativeOption(select, element);
+      await settle(Number(wait_after) || 0);
+      if (select.selectedIndex !== element.index) throw new Error("Вариант выпадающего списка не сохранился.");
+      return { success: true, element_id, click_type, element_name: element.label };
+    }
+
     // claude-for-arc: a disabled control ignores clicks; say so instead of
     // reporting a success that did nothing.
     if (this.isElementDisabled(element)) {
@@ -1332,7 +1440,7 @@ class BrowserAutomation {
   }
 
   getElementValue(element) {
-    if (element.tagName === "INPUT" || element.tagName === "TEXTAREA") {
+    if (element.tagName === "INPUT" || element.tagName === "TEXTAREA" || element.tagName === "SELECT") {
       return element.value;
     } else if (element.contentEditable === "true") {
       return element.textContent || element.innerText || "";
@@ -1442,6 +1550,7 @@ class BrowserAutomation {
   }
 
   isEmpty(element) {
+    if (element.tagName === "SELECT") return element.selectedIndex < 0;
     if (element.tagName === "INPUT" || element.tagName === "TEXTAREA") {
       return !element.value || element.value.trim().length === 0;
     }
@@ -1491,7 +1600,9 @@ class BrowserAutomation {
     if (selector) {
       describe = `selector «${selector}»`;
       try {
-        candidates = [...document.querySelectorAll(selector)].filter(isShown);
+        candidates = [...document.querySelectorAll(selector)].filter(element =>
+          action === "element_click" && element.tagName === "OPTION" ? nativeOptionIsShown(element) : isShown(element)
+        );
       } catch (error) {
         throw new Error(`Неверный CSS-селектор «${selector}»: ${error.message}`);
       }
@@ -1540,6 +1651,9 @@ class BrowserAutomation {
     let target = element_id ? this.getElementById(element_id) : document.activeElement;
     if (element_id && !target) throw new Error(`Element not found: ${element_id}`);
     if (!target || target === document.documentElement) target = document.body;
+    if ((name === "Enter" || name === " ") && target.matches('input[type="file"]')) {
+      throw new Error(FILE_PICKER_INSTRUCTIONS);
+    }
     if (element_id && typeof target.focus === "function") target.focus({ preventScroll: true });
     const mods = new Set((Array.isArray(modifiers) ? modifiers : [modifiers]).map((m) => String(m).toLowerCase()));
     const init = {
@@ -1554,8 +1668,19 @@ class BrowserAutomation {
       Object.defineProperty(event, "which", { get: () => keyCode });
       return target.dispatchEvent(event);
     };
+    const previousIndex = target.selectedIndex;
     const notPrevented = fire("keydown");
     if (notPrevented && (name === "Enter" || single)) fire("keypress");
+    if (notPrevented && mods.size === 0 && target.tagName === "SELECT" && !target.multiple &&
+        (name === "ArrowDown" || name === "ArrowUp") && target.selectedIndex === previousIndex &&
+        !this.isElementDisabled(target)) {
+      const options = [...target.options];
+      const next = name === "ArrowDown"
+        ? options.slice(previousIndex + 1)
+        : options.slice(0, previousIndex < 0 ? options.length : previousIndex).reverse();
+      const option = next.find(item => nativeOptionIsEnabled(item) && nativeOptionIsShown(item));
+      if (option) this.selectNativeOption(target, option);
+    }
     fire("keyup");
     // A real Enter in a single-line field submits its form; a synthetic one
     // does not, so do it here unless the page handled the key itself.
@@ -1614,6 +1739,10 @@ class BrowserAutomation {
   }
 
   getElementName(element) {
+    if (element.tagName === "SELECT") {
+      const name = fieldNames(element).find(candidate => candidate?.trim());
+      return name ? name.replace(/\s+/g, " ").trim() : "select";
+    }
     return (
       element.getAttribute("aria-label") ||
       element.getAttribute("title") ||

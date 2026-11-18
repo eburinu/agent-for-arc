@@ -20,6 +20,7 @@
     <article>
       <p>VISIBLE_MARKER: это видимый текст статьи, его извлечение обязано вернуть.</p>
       <p>Второй абзац для проверки переносов строк.</p>
+      <p id="long-text"></p>
     </article>
 
     <form id="form" onsubmit="event.preventDefault(); document.getElementById('result').textContent = 'SUBMITTED:' + document.getElementById('name').value;">
@@ -70,6 +71,39 @@
     <div class="tall"></div>
     <h2 id="section-a">Раздел A</h2>
     <p>BOTTOM_MARKER: конец страницы.</p>
+    <label for="records">Тип записи</label>
+    <select id="records">
+      <option value="a">Address</option>
+      <option value="disabled" disabled>Disabled</option>
+      <option value="txt">Text record</option>
+    </select>
+    <label for="attachment">Файл для импорта</label>
+    <input type="file" id="attachment" accept=".txt">
+    <p id="attachment-result">NO_ATTACHMENT</p>
+    <button id="select-long-text" type="button">Select long text</button>
+    <button id="reload" type="button">Reload fixture</button>
+    <p id="navigation-result"></p>
+    <script>
+      const longText = document.getElementById("long-text");
+      longText.textContent = "A".repeat(650) + " LONG_TEXT_END";
+      document.getElementById("select-long-text").addEventListener("click", () => {
+        getSelection().selectAllChildren(longText);
+      });
+      document.getElementById("attachment").addEventListener("change", async (event) => {
+        const file = event.target.files[0];
+        document.getElementById("attachment-result").textContent = file
+          ? file.name + ": " + await file.text()
+          : "NO_ATTACHMENT";
+      });
+      document.getElementById("reload").addEventListener("click", () => {
+        sessionStorage.setItem("fixture-reload-count", Number(sessionStorage.getItem("fixture-reload-count") || 0) + 1);
+        location.reload();
+      });
+      if (performance.getEntriesByType("navigation")[0].type === "reload") {
+        document.getElementById("navigation-result").textContent =
+          "RELOAD_CONFIRMED:" + sessionStorage.getItem("fixture-reload-count");
+      }
+    </script>
   </main>
 </body>
 </html>

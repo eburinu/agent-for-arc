@@ -76,7 +76,7 @@ export function getAvailableTools() {
     },
     {
       name: "element_click",
-      description: "Click an element, named by element_id, text, label or selector. Waits until the page settles (up to wait_after ms).",
+      description: "Click an element by element_id, text, label or selector. For a native dropdown option, target its CSS selector. System file pickers require user interaction; use element_fill(file) to attach provided bytes.",
       inputSchema: {
         type: "object",
         properties: {
@@ -89,16 +89,25 @@ export function getAvailableTools() {
     },
     {
       name: "element_fill",
-      description: "Type a value into a field (input, textarea, contenteditable), named by element_id, label (placeholder) or selector. Password, code and card fields are refused.",
+      description: "Fill a field by element_id, label or selector. Send value for text or a native dropdown option (its value or label). Send file for a file input with caller-provided bytes. Password, code and card fields are refused.",
       inputSchema: {
         type: "object",
         properties: {
           ...TARGET,
           value: { type: "string" },
+          file: {
+            type: "object",
+            description: "Attach one file supplied by the caller. Pass file instead of value. Local paths are not accepted.",
+            properties: {
+              name: { type: "string", description: "Filename without a directory." },
+              base64: { type: "string", description: "File contents encoded as base64, up to 1 MiB decoded." },
+              mime_type: { type: "string", description: "Optional MIME type, e.g. text/plain." },
+            },
+            required: ["name", "base64"],
+          },
           clear_first: { type: "boolean", default: true },
           tab_id: TAB,
         },
-        required: ["value"],
       },
     },
     {

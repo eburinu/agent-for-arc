@@ -4,6 +4,7 @@ if (typeof browser === 'undefined' && typeof chrome !== 'undefined') {
 }
 
 import * as guard from "./guard.js";
+import { sendContentAction } from "./content-transport.mjs";
 import { getAvailableTools, STEP_TOOLS } from "./tools.mjs";
 
 // Browser detection (kept for upstream code paths that branch on it)
@@ -352,7 +353,7 @@ async function runTool(method, rawParams) {
     }
     host = checked.host;
     const result = await executeTool(method, checked.params, checked);
-    guard.logCall({ tool: method, host, ok: true });
+    guard.logCall({ tool: method, host, ok: result?.success !== false, ...(result?.success === false ? { error: result.error || "Action failed" } : {}) });
     return result;
   } catch (error) {
     guard.logCall({ tool: method, host, ok: false, error: String(error.message).slice(0, 200) });
@@ -388,7 +389,9 @@ async function runSteps({ steps, stop_on_error = true, tab_id = null }) {
         if ((tool === "tab_create" || tool === "page_navigate") && newTab != null) tab = newTab;
         else if (args.tab_id != null && tool !== "tab_close") tab = args.tab_id;
       }
-      report.push({ index, tool, ok: true, ms: Date.now() - started, result });
+      const ok = result?.success !== false;
+      report.push({ index, tool, ok, ms: Date.now() - started, result, ...(ok ? {} : { error: result.error || "Action failed" }) });
+      if (!ok && stop_on_error) break;
     } catch (error) {
       report.push({ index, tool, ok: false, ms: Date.now() - started, error: error.message });
       if (stop_on_error) break;
@@ -496,16 +499,10 @@ async function sendToContentScript(action, data, targetTabId = null) {
   // Ensure content script is available in the target tab
   await ensureContentScriptReady(targetTab.id);
   
-  return new Promise((resolve, reject) => {
-    browser.tabs.sendMessage(targetTab.id, { action, data }, (response) => {
-      if (browser.runtime.lastError) {
-        reject(new Error(`Tab ${targetTab.id}: ${browser.runtime.lastError.message}`));
-      } else if (response && response.success) {
-        resolve(response.data);
-      } else {
-        reject(new Error(`Tab ${targetTab.id}: ${response?.error || 'Unknown error'}`));
-      }
-    });
+  return sendContentAction(browser, targetTab.id, action, data, async (tabId) => {
+    const method = action === "press_key" ? "press_key" : "element_click";
+    await guard.checkCall(method, { tab_id: tabId });
+    await ensureContentScriptReady(tabId);
   });
 }
 

@@ -17,6 +17,7 @@ function formatToolResult(toolName, result) {
 }
 
 function formatPressKey(result) {
+  if (result.response_lost) return `✅ Page reloaded or navigated during ${result.key}. The page response was interrupted.`;
   const on = result.element_name ? ` → ${String(result.element_name).slice(0, 60)}` : "";
   const extra = result.form_submitted ? " (form submitted)" : result.handled_by_page ? " (handled by the page)" : "";
   return `✅ Pressed ${result.key}${on}${extra}`;
@@ -154,28 +155,13 @@ function formatContentExtractionResult(result, metadata) {
   // summarize:true (the default) reports extraction_method; summarize:false reports method.
   const method = result.method || result.extraction_method;
   const contentSummary = `Extracted ${result.content_type} content using ${method}:\n\n`;
-  if (result.content) {
-    // Check if this is full content extraction (summarize=false) or summary
-    // If it's a content object with properties, show full content
-    // If it's a string or small content, it's probably summarized
-    let preview;
-    if (typeof result.content === "string") {
-      // String content - likely summarized, keep truncation
-      preview = result.content.substring(0, 500) + (result.content.length > 500 ? "..." : "");
-    } else if (result.content && typeof result.content === "object") {
-      // Object content - check if it's full content extraction
-      if (result.content.content && result.content.content.length > 1000) {
-        // This looks like full content extraction - don't truncate
-        preview = JSON.stringify(result.content, null, 2);
-      } else {
-        // Smaller content, apply truncation
-        preview = JSON.stringify(result.content, null, 2).substring(0, 500);
-      }
-    } else {
-      // Fallback
-      preview = JSON.stringify(result.content, null, 2).substring(0, 500);
-    }
-    
+  if (result.content !== undefined && result.content !== null) {
+    // The extension applies summarize/max_items before returning content. Preserve
+    // that payload, including short articles and arrays, without a second limit.
+    const preview = typeof result.content === "string"
+      ? result.content
+      : JSON.stringify(result.content, null, 2);
+
     return `${contentSummary}${preview}\n\n${JSON.stringify(
       metadata,
       null,
@@ -240,6 +226,7 @@ function formatContentSummary(summary, contentType) {
 }
 
 function formatElementClickResult(result) {
+  if (result.response_lost) return "✅ Page reloaded or navigated during the click. The page response was interrupted.";
   const type = result.click_type && result.click_type !== "left" ? ` (${result.click_type})` : "";
   return `✅ Clicked${type}: ${String(result.element_name || result.element_id).slice(0, 60)}`;
 }
@@ -311,12 +298,9 @@ function formatSelectedTextResult(result, metadata) {
     return `📝 No text selected\n\n${result.message || "No text is currently selected on the page"}\n\n${JSON.stringify(metadata, null, 2)}`;
   }
 
-  const textPreview = result.selected_text.length > 200
-    ? result.selected_text.substring(0, 200) + "..."
-    : result.selected_text;
+  // The extension already enforces the caller's max_length.
+  let summary = `📝 Selected Text (${result.character_count} characters):\n\n"${result.selected_text}"`;
 
-  let summary = `📝 Selected Text (${result.character_count} characters):\n\n"${textPreview}"`;
-  
   if (result.truncated) {
     summary += `\n\n⚠️ Text was truncated to fit length limit`;
   }

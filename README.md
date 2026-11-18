@@ -162,6 +162,7 @@ Download the file from the same link and open it. Claude updates the connector a
 | Claude tries to open Chrome instead of Arc | Decline and say it directly: "using claude-for-arc, …". |
 | The connector link shows 404 | Open the [latest release](https://github.com/eburinu/agent-for-arc/releases/latest) and download the connector from its assets. |
 | A click doesn't work on some site | Happens on sites with complex forms or bot protection. Ask Claude to try another way or do that step yourself. |
+| A site asks you to select a file | Use the system picker yourself, or use `element_fill` with `file: { name, base64, mime_type }` to attach supplied bytes (up to 1 MiB, with optional `mime_type`). The tool accepts a filename and contents. |
 
 ### Settings and security
 
