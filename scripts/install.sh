@@ -1,15 +1,15 @@
 #!/bin/bash
-# claude-for-arc installer for macOS.
+# Agent for Arc manual installer for macOS.
 #
 # Copies the extension and server to ~/claude-for-arc (or $CFA_HOME), creates
-# the connection key, registers the MCP server with Claude, then walks you
-# through loading the extension into Arc. Safe to run again to update.
+# the local connection key and prepares the extension for Arc.
+# Pass --claude to also register the server with the legacy Claude CLI path.
 set -euo pipefail
 
 NAME="claude-for-arc"
 SRC="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 DEST="${CFA_HOME:-$HOME/claude-for-arc}"
-DATA="$HOME/Library/Application Support/$NAME"
+DATA="${CFA_DATA_DIR:-$HOME/Library/Application Support/$NAME}"
 INTERACTIVE=0
 [ -t 0 ] && [ -t 1 ] && INTERACTIVE=1
 
@@ -21,6 +21,11 @@ ask()  { # ask "question" -> 0 for yes
   local reply; read -r -p "$1 [y/N] " reply; [[ "$reply" =~ ^[YyДд] ]]
 }
 pause() { [ "$INTERACTIVE" = 1 ] && read -r -p "$1" _ || true; }
+
+case "${1:-}" in
+  ""|--claude) ;;
+  *) die "Использование: bash scripts/install.sh [--claude]" ;;
+esac
 
 [ "$(uname -s)" = "Darwin" ] || die "этот установщик работает только на macOS."
 
@@ -43,11 +48,11 @@ esac
 
 step "2/5 Копирую файлы в $DEST"
 if [ -e "$DEST" ] && [ ! -f "$DEST/.claude-for-arc" ]; then
-  die "папка $DEST уже есть и это не claude-for-arc. Переименуйте её или задайте другую: CFA_HOME=/путь bash $0"
+  die "папка $DEST уже используется другим проектом. Укажите другую: CFA_HOME=/путь bash $0"
 fi
 if [ "$SRC" != "$DEST" ]; then
   mkdir -p "$DEST/scripts"
-  rsync -a --delete "$SRC/extension/" "$DEST/extension/"
+  rsync -a --delete --exclude /key.json "$SRC/extension/" "$DEST/extension/"
   rsync -a --delete --exclude test/ "$SRC/server/" "$DEST/server/"
   cp "$SRC/scripts/uninstall.sh" "$SRC/scripts/doctor.sh" "$SRC/scripts/desktop-config.js" "$DEST/scripts/"
   cp "$SRC/LICENSE" "$SRC/README.md" "$DEST/"
@@ -61,50 +66,47 @@ if [ ! -f "$DEST/server/node_modules/ws/package.json" ]; then
   (cd "$DEST/server" && "$NPM" ci --omit=dev --ignore-scripts --no-audit --no-fund --loglevel=error)
 fi
 
-step "3/5 Ключ подключения"
-mkdir -p "$DATA"
-chmod 700 "$DATA"
-if [ ! -s "$DATA/token" ]; then
-  (umask 077; "$NODE" -e 'process.stdout.write(require("crypto").randomBytes(32).toString("hex") + "\n")' > "$DATA/token")
-  say "Создан новый ключ: $DATA/token"
-else
-  say "Оставляю существующий ключ: $DATA/token"
-fi
-chmod 600 "$DATA/token"
-TOKEN="$(tr -d '\n' < "$DATA/token")"
-# The extension picks the key up from its own folder; no pasting needed.
-(umask 077; printf '{"token":"%s"}\n' "$TOKEN" > "$DEST/extension/key.json")
+step "3/5 Подготавливаю локальное подключение"
+CFA_DATA_DIR="$DATA" CFA_EXTENSION_DIR="$DEST/extension" CFA_DEPLOY_EXTENSION=1 CFA_NO_OPEN=1 \
+  "$NODE" "$DEST/server/server.js" --prepare-extension >/dev/null
 
-# The server must start and answer an MCP handshake before Claude is told about it.
+# Confirm that the installed server answers an MCP handshake.
 SMOKE_PORT=$(( 49152 + RANDOM % 10000 ))
 SMOKE="$( { printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}'; sleep 1; } \
   | CFA_PORT="$SMOKE_PORT" "$NODE" "$DEST/server/server.js" 2>/dev/null || true)"
 case "$SMOKE" in
-  *'"claude-for-arc"'*) say "Сервер запускается и отвечает." ;;
+  *'"agent-for-arc"'*) say "Сервер запускается и отвечает." ;;
   *) die "сервер не запустился. Попробуйте вручную: $NODE $DEST/server/server.js" ;;
 esac
 
-step "4/5 Подключаю к Claude"
-CLAUDE_BIN="$(command -v claude 2>/dev/null || true)"
-if [ -z "$CLAUDE_BIN" ]; then
-  CLAUDE_BIN="$(ls -d "$HOME/Library/Application Support/Claude/claude-code"/*/*/claude.app/Contents/MacOS/claude 2>/dev/null | sort -V | tail -1 || true)"
-fi
-if [ -n "$CLAUDE_BIN" ] && [ -x "$CLAUDE_BIN" ]; then
-  "$CLAUDE_BIN" mcp remove --scope user "$NAME" >/dev/null 2>&1 || true
-  "$CLAUDE_BIN" mcp add --scope user "$NAME" -- "$NODE" "$DEST/server/server.js" >/dev/null
-  say "Добавлено в Claude Code (вкладка Code в приложении Claude)."
-else
-  say "Не нашёл Claude Code. Если пользуетесь им, добавьте сервер вручную:"
-  say "  claude mcp add --scope user $NAME -- \"$NODE\" \"$DEST/server/server.js\""
-fi
-
-if ask "Подключить ещё и к обычному чату Claude (вкладка Chat)?"; then
-  if ps -axo comm= | grep -x "/Applications/Claude.app/Contents/MacOS/Claude" >/dev/null; then
-    say "Приложение Claude открыто — оно может перезаписать настройки чата."
-    pause "Закройте Claude полностью (⌘Q) и нажмите Enter… "
+step "4/5 Подключение к MCP-клиенту"
+if [ "${1:-}" = "--claude" ]; then
+  CLAUDE_BIN="$(command -v claude 2>/dev/null || true)"
+  if [ -z "$CLAUDE_BIN" ]; then
+    CLAUDE_BIN="$(ls -d "$HOME/Library/Application Support/Claude/claude-code"/*/*/claude.app/Contents/MacOS/claude 2>/dev/null | sort -V | tail -1 || true)"
   fi
-  "$NODE" "$DEST/scripts/desktop-config.js" add "$NODE" "$DEST/server/server.js" \
-    || say "Чат не подключён. Закройте Claude (⌘Q) и запустите установщик снова."
+  if [ -n "$CLAUDE_BIN" ] && [ -x "$CLAUDE_BIN" ]; then
+    "$CLAUDE_BIN" mcp remove --scope user "$NAME" >/dev/null 2>&1 || true
+    "$CLAUDE_BIN" mcp add --scope user "$NAME" -- "$NODE" "$DEST/server/server.js" >/dev/null
+    say "Добавлено в Claude Code (вкладка Code в приложении Claude)."
+  else
+    say "Не нашёл Claude Code. Если пользуетесь им, добавьте сервер вручную:"
+    say "  claude mcp add --scope user $NAME -- \"$NODE\" \"$DEST/server/server.js\""
+  fi
+
+  if ask "Подключить ещё и к обычному чату Claude (вкладка Chat)?"; then
+    if ps -axo comm= | grep -x "/Applications/Claude.app/Contents/MacOS/Claude" >/dev/null; then
+      say "Приложение Claude открыто — оно может перезаписать настройки чата."
+      pause "Закройте Claude полностью (⌘Q) и нажмите Enter… "
+    fi
+    "$NODE" "$DEST/scripts/desktop-config.js" add "$NODE" "$DEST/server/server.js" \
+      || say "Чат не подключён. Закройте Claude (⌘Q) и запустите установщик снова."
+  fi
+else
+  say "Добавьте в выбранном MCP-клиенте локальный сервер со стандартным вводом и выводом (stdio)."
+  say "Команда: $NODE"
+  say "Аргумент: $DEST/server/server.js"
+  say "Для автоматического обновления расширения задайте CFA_DEPLOY_EXTENSION=1 и CFA_EXTENSION_DIR=$DEST/extension."
 fi
 
 step "5/5 Расширение в Arc"
@@ -112,13 +114,11 @@ say "1. Откройте в Arc адрес arc://extensions и включите 
 say "2. Нажмите «Загрузить распакованное» (Load unpacked) и выберите папку:"
 say "     $DEST/extension"
 say "   Сейчас откроется Finder с этой папкой — её можно перетащить в окно выбора."
-open -R "$DEST/extension" 2>/dev/null || true
+if [ "${CFA_NO_OPEN:-0}" != 1 ]; then open -R "$DEST/extension" 2>/dev/null || true; fi
 pause "Нажмите Enter, когда расширение появится в Arc… "
 
 say "3. Ключ подключения уже лежит в папке расширения, вставлять его не нужно."
-say "4. Начните НОВУЮ сессию во вкладке Code приложения Claude — появятся инструменты"
-say "   claude-for-arc, а расширение покажет «Подключено». Сессии, открытые до установки,"
-say "   сервер не запускают."
+say "4. Откройте новую сессию в настроенном MCP-клиенте. Инструменты Agent for Arc появятся в сессии."
 say ""
 say "Если расширение пишет «Сервер не запущен»: bash \"$DEST/scripts/doctor.sh\""
 say ""

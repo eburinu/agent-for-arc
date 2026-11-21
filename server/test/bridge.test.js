@@ -111,7 +111,8 @@ const TOOL = { name: "tab_list", description: "List tabs", inputSchema: { type: 
 test("authenticated extension registers tools and serves calls", async () => {
   const server = startServer();
   await server.waitFor("Listening on");
-  await server.rpc("initialize", { clientInfo: { name: "test" } });
+  const { result: initialized } = await server.rpc("initialize", { clientInfo: { name: "test" } });
+  assert.deepEqual(initialized.serverInfo, { name: "agent-for-arc", version: require("../package.json").version });
 
   const { ws } = await connectExtension({
     tools: [TOOL],
@@ -272,11 +273,23 @@ test("connector mode: places the extension with its key and asks an old one to r
     assert.equal(fs.readdirSync(dir).length, 1, "no staging folder left behind");
 
     const messages = [];
-    const old = await connectExtension({ version: "0.0.1", onMessage: (m) => messages.push(m) });
+    const oldCalls = [];
+    const old = await connectExtension({
+      version: "0.0.1", tools: [TOOL], onMessage: (m) => messages.push(m),
+      onCall: (message) => oldCalls.push(message),
+    });
     await server.waitFor("asking it to reload");
-    await sleep(200);
     assert.deepEqual(messages.filter((m) => m.type === "reload").length, 1);
+    const calling = server.rpc("tools/call", { name: "tab_list", arguments: {} });
+    await sleep(100);
+    assert.equal(oldCalls.length, 0, "the first request waits for the new worker");
     old.ws.close();
+    const upgraded = await connectExtension({
+      version: bundled, tools: [TOOL],
+      onCall: (msg, sock) => sock.send(JSON.stringify({ id: msg.id, result: { success: true, tabs: [], count: 0 } })),
+    });
+    assert.equal((await calling).result.isError, false);
+    upgraded.ws.close();
 
     // A second old registration in the same run does not trigger another reload.
     const again = [];

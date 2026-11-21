@@ -46,7 +46,7 @@ const ANTI_DETECTION_PLATFORMS = {
   },
 };
 
-// claude-for-arc: fields whose contents must never be read or written by the model.
+// Agent for Arc: fields whose contents must never be read or written by the model.
 const SENSITIVE_AUTOCOMPLETE = /(^|\s)(current-password|new-password|one-time-code|cc-number|cc-csc|cc-exp|cc-exp-month|cc-exp-year)(\s|$)/i;
 const SENSITIVE_NAME = /(^|[^a-z])(pass(word|wd|code|phrase)?|pwd|pin|cvv|cvc|csc|otp|2fa|totp)([^a-z]|$)|card.?number|security.?code/i;
 
@@ -62,7 +62,7 @@ function isSensitiveField(element) {
   return SENSITIVE_NAME.test(label);
 }
 
-// claude-for-arc: readable text of an element. textContent (used upstream)
+// Agent for Arc: readable text of an element. textContent (used upstream)
 // includes the source of <style> and <script> tags, which on heavy sites is
 // most of the page; innerText is what the user actually sees. Capped so one
 // page cannot flood the conversation.
@@ -91,7 +91,7 @@ function readableText(element, maxChars = MAX_TEXT_CHARS) {
     .replace(/\n{3,}/g, "\n\n")
     .trim();
   if (text.length > maxChars) {
-    text = text.slice(0, maxChars) + `\n… [claude-for-arc: обрезано, всего ${text.length} символов]`;
+    text = text.slice(0, maxChars) + `\n… [Agent for Arc: обрезано, всего ${text.length} символов]`;
   }
   return text;
 }
@@ -99,7 +99,7 @@ function readableText(element, maxChars = MAX_TEXT_CHARS) {
 // Upper bound per element registry, so a long-lived tab can't grow it forever.
 const MAX_REGISTRY_ENTRIES = 1000;
 
-// claude-for-arc: actions whose element can be named by text / label / selector.
+// Agent for Arc: actions whose element can be named by text / label / selector.
 const TARGETED_ACTIONS = new Set(["element_click", "element_fill", "get_element_state", "press_key"]);
 const MAX_FILE_BYTES = 1024 * 1024;
 const FILE_PICKER_INSTRUCTIONS =
@@ -217,7 +217,7 @@ class BrowserAutomation {
     const startTime = performance.now();
 
     try {
-      // claude-for-arc: element actions may name the element directly (button
+      // Agent for Arc: element actions may name the element directly (button
       // text, field label or placeholder, CSS selector) instead of an id from
       // page_analyze, which saves a whole round trip per action.
       if (TARGETED_ACTIONS.has(action) && data && !data.element_id && (data.selector || data.text || data.label)) {
@@ -238,12 +238,12 @@ class BrowserAutomation {
           result = await this.clickElement(data);
           break;
         case "element_fill": {
-          // claude-for-arc: passwords, one-time codes and card data are typed
+          // Agent for Arc: passwords, one-time codes and card data are typed
           // by the user, never by the model.
           const target = this.getElementById(data.element_id);
           if (target && isSensitiveField(target)) {
             throw new Error(
-              "claude-for-arc: это поле для пароля, кода или данных карты — его заполняет только пользователь"
+              "Agent for Arc: это поле для пароля, кода или данных карты — его заполняет только пользователь"
             );
           }
           result = await this.fillElementWithAntiDetection(data);
@@ -264,7 +264,7 @@ class BrowserAutomation {
             element_name: this.getElementName(element),
             state: this.getElementState(element),
             current_value: sensitive
-              ? "[скрыто claude-for-arc]"
+              ? "[скрыто Agent for Arc]"
               : this.getElementValue(element),
           };
           if (numericWidget) {
@@ -687,7 +687,7 @@ class BrowserAutomation {
     const viewportElements = this.countViewportElements();
 
     // Use default max results limit
-    max_results = Math.min(max_results, 10); // claude-for-arc: was 5
+    max_results = Math.min(max_results, 10); // Agent for Arc: was 5
 
     // Try to find obvious matches using enhanced patterns
     let quickMatches = [];
@@ -808,7 +808,7 @@ class BrowserAutomation {
     const startTime = performance.now();
 
     // Use default max results limit  
-    max_results = Math.min(max_results, 30); // claude-for-arc: was capped at 7
+    max_results = Math.min(max_results, 30); // Agent for Arc: was capped at 7
 
     let elements = [];
     let method = "detailed_analysis";
@@ -1291,7 +1291,7 @@ class BrowserAutomation {
       return { success: true, element_id, click_type, element_name: element.label };
     }
 
-    // claude-for-arc: a disabled control ignores clicks; say so instead of
+    // Agent for Arc: a disabled control ignores clicks; say so instead of
     // reporting a success that did nothing.
     if (this.isElementDisabled(element)) {
       throw new Error(`Элемент «${this.getElementName(element)}» выключен (disabled) — клик ничего не сделает`);
@@ -1601,7 +1601,7 @@ class BrowserAutomation {
   }
 
   // Utility methods
-  // claude-for-arc: find the element an action names by selector, visible
+  // Agent for Arc: find the element an action names by selector, visible
   // text (buttons, links) or label / placeholder (fields). Prefers visible,
   // better-matching and smaller (more specific) elements.
   findTarget({ selector, text, label, index = 0 }, action) {
@@ -1647,7 +1647,7 @@ class BrowserAutomation {
     return found;
   }
 
-  // claude-for-arc: one key press on the given element or the focused one.
+  // Agent for Arc: one key press on the given element or the focused one.
   async pressKey({ element_id, key = "Enter", modifiers = [], wait_after = 1000 }) {
     const KEYS = {
       Enter: ["Enter", 13], Escape: ["Escape", 27], Tab: ["Tab", 9], Backspace: ["Backspace", 8],
@@ -1790,7 +1790,7 @@ class BrowserAutomation {
     return "element";
   }
 
-  // claude-for-arc: score by how many words of the hint the element mentions
+  // Agent for Arc: score by how many words of the hint the element mentions
   // (name, placeholder, label, id) plus whether its kind matches words like
   // "кнопка"/"button" or "ссылка"/"link". Upstream only matched the whole hint
   // as one substring, so multi-word hints left every element tied at 0.5.
@@ -1982,7 +1982,7 @@ class BrowserAutomation {
     );
     const visibleElements = Array.from(candidates)
       .filter((el) => this.isLikelyVisible(el))
-      .slice(0, 300); // claude-for-arc: was the first 10 visible elements
+      .slice(0, 300); // Agent for Arc: was the first 10 visible elements
 
     const scoredElements = visibleElements.map((element) => {
       const confidence = this.calculateConfidence(element, intent_hint);
@@ -2101,7 +2101,7 @@ class BrowserAutomation {
 
     const elements = Array.from(relevantElements)
       .filter((el) => this.isLikelyVisible(el))
-      .slice(0, 600) // claude-for-arc: whole page, not just the first 30
+      .slice(0, 600) // Agent for Arc: whole page, not just the first 30
       .map((element) => {
         const elementId = this.registerElement(element);
         return {

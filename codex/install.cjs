@@ -31,12 +31,33 @@ function findCodex() {
   throw new Error("Install Codex or set CFA_CODEX_BIN to the absolute path of the Codex CLI.");
 }
 
+const ORIGINAL_LAUNCHER = '#!/bin/bash\nset -euo pipefail\n' +
+    'release="$(cd "$(dirname "$0")/current" && pwd -P)"\n' +
+    'exec "$release/node" "$release/server/server.js"\n';
+// Resolve the release once, so an update cannot mix files from two versions.
+// Deploy at startup as well: the bridge then asks a running old worker to reload.
+const MANAGED_LAUNCHER = ORIGINAL_LAUNCHER.replace('exec ',
+  'export CFA_DEPLOY_EXTENSION=1 CFA_NO_OPEN=1 CFA_KEEP_INSTALLED_EXTENSION=0\nexec ');
+
+function checkLauncher(launcher) {
+  if (!fs.existsSync(launcher)) return;
+  const content = fs.readFileSync(launcher, "utf8");
+  if (content !== ORIGINAL_LAUNCHER && content !== MANAGED_LAUNCHER) {
+    throw new Error(`The launcher was customized: ${launcher}. Back it up and remove it before installing.`);
+  }
+}
+
 function writeLauncher(dest) {
   const launcher = path.join(dest, "start.sh");
-  // Resolve the release once, so an update cannot mix files from two versions.
-  fs.writeFileSync(launcher, '#!/bin/bash\nset -euo pipefail\n' +
-    'release="$(cd "$(dirname "$0")/current" && pwd -P)"\n' +
-    'exec "$release/node" "$release/server/server.js"\n', { mode: 0o700, flag: "wx" });
+  checkLauncher(launcher);
+  const staging = fs.mkdtempSync(path.join(dest, ".launcher-"));
+  try {
+    const file = path.join(staging, "start.sh");
+    fs.writeFileSync(file, MANAGED_LAUNCHER, { mode: 0o700, flag: "wx" });
+    fs.renameSync(file, launcher);
+  } finally {
+    fs.rmSync(staging, { recursive: true, force: true });
+  }
 }
 
 function install() {
@@ -50,11 +71,11 @@ function install() {
   if (existing && !(transport?.command === "/bin/bash" && transport?.args?.length === 1 && transport.args[0] === launcher)) {
     throw new Error('Codex already has a different MCP server named "arc". Rename that entry before installing.');
   }
+  checkLauncher(launcher);
 
   const version = require("./server/package.json").version;
   if (!/^\d+\.\d+\.\d+$/.test(version)) throw new Error("Invalid release version.");
   fs.mkdirSync(dest, { recursive: true, mode: 0o700 });
-  if (!fs.existsSync(launcher)) writeLauncher(dest);
 
   const releases = path.join(dest, "releases");
   fs.mkdirSync(releases, { recursive: true, mode: 0o700 });
@@ -77,8 +98,12 @@ function install() {
 
   const prepared = JSON.parse(run(path.join(release, "node"),
     [path.join(release, "server", "server.js"), "--prepare-extension"],
-    { ...process.env, CFA_DEPLOY_EXTENSION: "1", CFA_KEEP_INSTALLED_EXTENSION: "1" }));
+    // Upgrade the shared extension too, including when an older installer left
+    // KEEP_INSTALLED_EXTENSION in the caller's environment. The server creates
+    // or reuses the local token and bundles it as key.json; no client API key.
+    { ...process.env, CFA_DEPLOY_EXTENSION: "1", CFA_KEEP_INSTALLED_EXTENSION: "0" }));
   if (!prepared?.target) throw new Error("Could not prepare the Arc extension.");
+  writeLauncher(dest);
 
   const current = path.join(dest, "current");
   // Switch to the new release without disturbing sessions using the old one.
@@ -100,6 +125,10 @@ function install() {
   console.log(prepared.fresh
     ? `Arc → Developer mode → Load unpacked → ${prepared.target}`
     : `Arc extension folder / Папка расширения Arc: ${prepared.target}`);
+  if (prepared.updated && !prepared.fresh) {
+    console.log("If Arc still shows the old extension, click ↻ at arc://extensions. / Если в Arc осталась старая версия, нажмите ↻ в arc://extensions.");
+  }
+  console.log("Local connection key prepared automatically. / Локальный ключ подключения подготовлен автоматически.");
   console.log("Restart Codex and open a new chat. / Перезапустите Codex и откройте новый чат.");
   if (existing?.enabled === false) console.log("Enable arc in Codex Settings → MCP servers.");
 }

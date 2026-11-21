@@ -1,4 +1,4 @@
-// claude-for-arc: pure policy helpers shared by the background worker and the
+// Agent for Arc: pure policy helpers shared by the background worker and the
 // popup. No chrome.* access here, so test/policy.test.mjs can run it in node.
 
 export const DEFAULT_SETTINGS = Object.freeze({
@@ -85,7 +85,7 @@ export function urlProblem(rawUrl, blocklist, { allowBlank = false } = {}) {
     if (hostMatches(host, domain)) return `${host} — магазин расширений, доступ к нему закрыт всегда`;
   }
   for (const domain of blocklist || []) {
-    if (hostMatches(host, domain)) return `${host} в списке запрещённых сайтов claude-for-arc`;
+    if (hostMatches(host, domain)) return `${host} в списке запрещённых сайтов Agent for Arc`;
   }
   return null;
 }

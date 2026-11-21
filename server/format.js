@@ -2,8 +2,8 @@
 // (aeonfun/opendia, MIT) so upstream fixes stay easy to port.
 
 // Tool result formatting
-// claude-for-arc: the formatters below come from OpenDia and end every reply
-// with a JSON block of tool name / timing. Claude re-reads each reply on every
+// Agent for Arc: the formatters below come from OpenDia and end every reply
+// with a JSON block of tool name / timing. Clients read each reply again on every
 // later step, so that block is dropped, and run_steps gets a compact report.
 const METADATA_TAIL = /\s*\{\s*"tool":[^{}]*\}\s*$/;
 const READ_TOOLS = new Set([

@@ -1,5 +1,5 @@
 #!/bin/bash
-# Removes claude-for-arc: the Claude registrations, the installed files and,
+# Removes the manual Agent for Arc installation, its legacy registrations and,
 # if you agree, the connection key. The extension itself is removed in Arc.
 set -euo pipefail
 
@@ -32,16 +32,16 @@ main() {
     rm -rf "$DEST"
     say "Удалена папка $DEST."
   elif [ -e "$DEST" ]; then
-    say "Папка $DEST не похожа на claude-for-arc — не трогаю её."
+    say "Папка $DEST не похожа на установку Agent for Arc."
   fi
 
-  if [ -d "$DATA" ]; then
-    read -r -p "Удалить и ключ подключения ($DATA)? [y/N] " reply || reply=""
-    if [[ "$reply" =~ ^[YyДд] ]]; then rm -rf "$DATA"; say "Ключ удалён."; fi
+  if [ -f "$DATA/token" ]; then
+    read -r -p "Удалить общий локальный ключ всех MCP-клиентов ($DATA/token)? [y/N] " reply || reply=""
+    if [[ "$reply" =~ ^[YyДд] ]]; then rm -f "$DATA/token"; say "Ключ удалён."; fi
   fi
 
   say ""
-  say "Осталось удалить само расширение: arc://extensions → claude-for-arc → «Удалить»."
+  say "Если расширение больше не используется, удалите Agent for Arc на странице arc://extensions."
 }
 
 main "$@"

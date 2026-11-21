@@ -1,5 +1,5 @@
 {
   "description": {
-    "message": "Lets Claude drive the Arc browser. Based on OpenDia (MIT)."
+    "message": "Lets AI agents control the Arc browser through a local MCP connector. Based on OpenDia (MIT)."
   }
 }

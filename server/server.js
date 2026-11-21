@@ -1,8 +1,8 @@
 #!/usr/bin/env node
-// claude-for-arc MCP server.
+// Agent for Arc MCP server.
 //
-// Speaks MCP over stdio to Claude and Codex, and drives the browser through the
-// claude-for-arc extension over a WebSocket on 127.0.0.1. Based on OpenDia
+// Speaks MCP over stdio to the selected client and drives the browser through
+// the extension over a WebSocket on 127.0.0.1. Based on OpenDia
 // (aeonfun/opendia, MIT), with the network surface cut down to one loopback
 // socket that both sides authenticate with a shared secret:
 //
@@ -25,14 +25,16 @@ const fs = require("fs");
 const os = require("os");
 const path = require("path");
 const { formatToolResult } = require("./format.js");
-const { deployExtension } = require("./deploy.js");
+const { deployExtension, isNewer } = require("./deploy.js");
 
 const startupTools = import("../extension/src/background/tools.mjs").then(({ getAvailableTools }) =>
   getAvailableTools().filter(({ name }) => !["get_history", "get_bookmarks", "add_bookmark"].includes(name))
 );
 
-const SERVER_NAME = "claude-for-arc";
-const SERVER_VERSION = "0.5.0";
+const SERVER_NAME = "agent-for-arc";
+const SERVER_VERSION = require("./package.json").version;
+// Older processes and extensions check this exact wire identifier.
+const BRIDGE_ID = "claude-for-arc";
 
 // Pinned by the "key" in extension/manifest.json.
 const EXTENSION_ID = process.env.CFA_EXTENSION_ID || "dllpmmijlpleaoifjffigbcilgmhjpla";
@@ -40,7 +42,7 @@ const EXTENSION_ORIGIN = `chrome-extension://${EXTENSION_ID}`;
 
 const DATA_DIR =
   process.env.CFA_DATA_DIR ||
-  path.join(os.homedir(), "Library", "Application Support", SERVER_NAME);
+  path.join(os.homedir(), "Library", "Application Support", BRIDGE_ID);
 const TOKEN_FILE = path.join(DATA_DIR, "token");
 
 const PORT = parsePort(process.env.CFA_PORT) ?? 5555;
@@ -72,12 +74,10 @@ function parsePort(raw) {
 
 function loadOrCreateToken() {
   fs.mkdirSync(DATA_DIR, { recursive: true, mode: 0o700 });
-  // Installed from claude-for-arc.mcpb, Claude passes the key the user copied
-  // from the extension. Unfilled, the placeholder arrives verbatim; ignore it.
+  // Optional explicit override for custom or older MCP configurations.
   const given = (process.env.CFA_TOKEN || "").trim().toLowerCase();
   if (/^[0-9a-f]{64}$/.test(given)) {
-    // Keep the key file in step so doctor.sh and a Claude Code registration
-    // of this server use the same key.
+    // Keep other registrations and the installed extension on the same key.
     let current = "";
     try { current = fs.readFileSync(TOKEN_FILE, "utf8").trim(); } catch {}
     if (current !== given) fs.writeFileSync(TOKEN_FILE, given + "\n", { mode: 0o600 });
@@ -92,9 +92,23 @@ function loadOrCreateToken() {
     if (error.code !== "ENOENT") throw error;
   }
   const token = crypto.randomBytes(32).toString("hex");
-  fs.writeFileSync(TOKEN_FILE, token + "\n", { mode: 0o600 });
-  log(`Created a new token in ${TOKEN_FILE}; paste it into the extension popup`);
-  return token;
+  const staging = path.join(DATA_DIR, `.token-${process.pid}-${crypto.randomBytes(8).toString("hex")}`);
+  try {
+    fs.writeFileSync(staging, token + "\n", { mode: 0o600, flag: "wx" });
+    try {
+      // Concurrent first launches from different clients must keep one key.
+      fs.linkSync(staging, TOKEN_FILE);
+    } catch (error) {
+      if (error.code !== "EEXIST") throw error;
+      const existing = fs.readFileSync(TOKEN_FILE, "utf8").trim();
+      if (/^[0-9a-f]{64}$/.test(existing)) return existing;
+      fs.renameSync(staging, TOKEN_FILE);
+    }
+    log("Created a local connection key");
+    return token;
+  } finally {
+    fs.rmSync(staging, { force: true });
+  }
 }
 
 if (process.argv[2] === "--prepare-extension") {
@@ -133,6 +147,7 @@ function isNonce(value) {
 
 let wss = null;
 let extensionSocket = null;
+let extensionRegistered = false;
 let availableTools = [];
 let activeBrowserCalls = 0;
 let standbyTimer = null;
@@ -144,7 +159,7 @@ let clientInitialized = false;
 let lastToolSignature = "";
 
 function extensionReady() {
-  return extensionSocket !== null && extensionSocket.readyState === WebSocket.OPEN;
+  return extensionRegistered && extensionSocket?.readyState === WebSocket.OPEN;
 }
 
 function toolSignature(tools) {
@@ -170,6 +185,7 @@ function dropExtension(ws, reason) {
   if (extensionSocket !== ws) return;
   log(`Extension disconnected (${reason})`);
   extensionSocket = null;
+  extensionRegistered = false;
   availableTools = [];
   rejectPending("Расширение отключилось во время вызова");
   notifyToolsListChanged();
@@ -207,7 +223,7 @@ function handleConnection(ws, req) {
 
   ws.send(JSON.stringify({
     type: "challenge",
-    server: SERVER_NAME,
+    server: BRIDGE_ID,
     version: SERVER_VERSION,
     nonce: serverNonce,
   }));
@@ -227,20 +243,23 @@ function handleConnection(ws, req) {
     }
 
     if (message.type === "register") {
-      if (!Array.isArray(message.tools)) return;
-      availableTools = message.tools.filter(
-        (t) => t && typeof t.name === "string" && typeof t.description === "string"
-      );
-      log(`Extension registered ${availableTools.length} tools`);
-      notifyToolsListChanged();
+      if (extensionSocket !== ws || !Array.isArray(message.tools)) return;
       // The folder holds a newer version than the one running: have the
       // extension reload itself from disk. Once per server run, so an
       // extension loaded from some other folder cannot loop.
-      if (deployed && typeof message.version === "string" && message.version !== deployed.version && !reloadSent) {
+      if (deployed && typeof message.version === "string" &&
+          isNewer(deployed.version, message.version) && !reloadSent) {
         reloadSent = true;
         log(`Extension ${message.version} is running, ${deployed.version} is on disk; asking it to reload`);
         ws.send(JSON.stringify({ type: "reload" }));
+        return;
       }
+      availableTools = message.tools.filter(
+        (t) => t && typeof t.name === "string" && typeof t.description === "string"
+      );
+      extensionRegistered = true;
+      log(`Extension registered ${availableTools.length} tools`);
+      notifyToolsListChanged();
     } else if (message.type === "ping") {
       ws.send(JSON.stringify({ type: "pong", timestamp: Date.now() }));
     } else if (typeof message.id === "string") {
@@ -328,7 +347,7 @@ function requestTakeover() {
     ws.on("message", (data) => {
       let message;
       try { message = JSON.parse(data); } catch { return done(false); }
-      if (message.type === "challenge" && message.server === SERVER_NAME && isNonce(message.nonce)) {
+      if (message.type === "challenge" && message.server === BRIDGE_ID && isNonce(message.nonce)) {
         const nonce = crypto.randomBytes(32).toString("hex");
         ws.send(JSON.stringify({ type: "auth", role: "takeover", nonce, mac: mac("takeover", message.nonce, nonce) }));
       } else if (message.type === "takeover_ok") {
@@ -435,12 +454,11 @@ function notConnectedText() {
       "Возможно, порт занят другой программой.";
   }
   if (deployed) {
-    return "❌ Расширение claude-for-arc не подключено к Arc. Один раз: откройте в Arc arc://extensions, " +
-      "включите «Режим разработчика» (Developer mode), нажмите «Загрузить распакованное» (Load unpacked) " +
-      `и выберите папку ${deployed.target}. Ключ уже лежит внутри, вставлять ничего не нужно.`;
+    return "Agent for Arc не подключён. Откройте в Arc arc://extensions и проверьте, что расширение включено. " +
+      `При первой установке включите режим разработчика и загрузите папку ${deployed.target}. Локальный ключ подготовлен автоматически.`;
   }
-  return "❌ Расширение claude-for-arc не подключено. Откройте Arc, убедитесь, что расширение " +
-    "включено, и вставьте ключ подключения в его окно (значок расширения на панели Arc).";
+  return "Agent for Arc не подключён. Откройте Arc, проверьте расширение на arc://extensions и нажмите «Переподключить». " +
+    "Если клиент настроен вручную, проверьте, что сервер запущен с CFA_DEPLOY_EXTENSION=1 для автоматической подготовки ключа.";
 }
 
 async function callBrowserTool(name, args) {
@@ -475,7 +493,7 @@ async function handleMCPRequest(request) {
           capabilities: { tools: { listChanged: true } },
           serverInfo: { name: SERVER_NAME, version: SERVER_VERSION },
           instructions:
-            "Controls the user's Arc browser through the claude-for-arc extension. " +
+            "Controls the user's Arc browser through the Agent for Arc extension. " +
             "Use these tools when the user asks to work in Arc. Start with tab_create. " +
             "Use run_steps for sequences and target elements by visible text or label. " +
             "By default the extension limits access to tabs opened through its tools. " +

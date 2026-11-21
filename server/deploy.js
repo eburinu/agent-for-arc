@@ -1,12 +1,12 @@
 "use strict";
 
-// When claude-for-arc is installed as a Claude desktop extension (.mcpb), the
-// bundle carries the browser extension too. On start the server lays it out in
+// The Codex archive and the MCP bundle carry the browser extension too.
+// On start the server lays it out in
 // a stable folder the user loads into Arc once, with the connection key inside
 // (key.json), so nothing has to be copied by hand. Later versions overwrite the
 // folder and the extension reloads itself (see "reload" in server.js).
 //
-// Only runs when CFA_DEPLOY_EXTENSION=1 (set by mcpb/manifest.json).
+// Only runs when CFA_DEPLOY_EXTENSION=1.
 
 const fs = require("fs");
 const os = require("os");
@@ -43,6 +43,7 @@ function chooseTarget(dataDir) {
 }
 
 function isNewer(candidate, installed) {
+  if (!/^\d+(?:\.\d+){0,3}$/.test(candidate) || !/^\d+(?:\.\d+){0,3}$/.test(installed)) return false;
   const versions = [candidate, installed].map((value) => value.split(".").map(Number));
   for (let i = 0; i < Math.max(...versions.map((parts) => parts.length)); i++) {
     const diff = (versions[0][i] || 0) - (versions[1][i] || 0);
@@ -99,4 +100,4 @@ function deployExtension({ token, dataDir, log }) {
   return { target, version: updated ? version : installed, fresh, updated };
 }
 
-module.exports = { deployExtension };
+module.exports = { deployExtension, isNewer };

@@ -172,7 +172,7 @@ check("actions are logged", log.length >= 10, String(log.length));
 await chrome.storage.local.set({ token: crypto.randomBytes(32).toString("hex") });
 await sleep(1500);
 r = await call("tab_list", {});
-check("wrong key: no connection", r.err && /не подключено/.test(r.text), r.text);
+check("wrong key: no connection", r.err && /Agent for Arc не подключён/.test(r.text), r.text);
 
 server.kill();
 fs.rmSync(dataDir, { recursive: true, force: true });

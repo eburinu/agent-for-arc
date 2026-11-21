@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <title>claude-for-arc</title>
+  <title>Agent for Arc</title>
   <style>
     :root {
       --bg: #ffffff;
@@ -41,6 +41,8 @@
     .lang button[aria-pressed=true] { background: var(--accent); color: #fff; }
     h1 { font-size: 15px; margin: 0; }
     section { border-top: 1px solid var(--border); padding: 10px 0; }
+    summary { cursor: pointer; color: var(--muted); font-size: 11px; font-weight: 600; }
+    details[open] summary { margin-bottom: 6px; }
     h2 { font-size: 11px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); margin: 0 0 6px; font-weight: 600; }
     .status { display: flex; align-items: center; gap: 8px; }
     .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--muted); flex: none; }
@@ -78,7 +80,7 @@
 </head>
 <body>
   <header>
-    <h1>claude-for-arc</h1>
+    <h1>Agent for Arc</h1>
     <div class="lang" role="group" aria-label="Language">
       <button id="langEn" data-lang="en" aria-pressed="false">EN</button>
       <button id="langRu" data-lang="ru" aria-pressed="false">RU</button>
@@ -102,7 +104,8 @@
   </section>
 
   <section id="keySection">
-    <h2 data-i18n="keyTitle"></h2>
+    <details id="advancedConnection">
+    <summary data-i18n="keyTitle"></summary>
     <div id="keySaved" hidden>
       <div class="row">
         <span class="saved" data-i18n="keyInPlace"></span>
@@ -114,8 +117,9 @@
         <input type="password" id="token" data-i18n-placeholder="keyPlaceholder" autocomplete="off" spellcheck="false">
         <button class="primary" id="saveToken" data-i18n="save"></button>
       </div>
-      <p class="hint"><span data-i18n="keyHint"></span> <code>cat ~/Library/Application\ Support/claude-for-arc/token</code>.</p>
+      <p class="hint"><span data-i18n="keyHint"></span></p>
     </div>
+    </details>
   </section>
 
   <section>

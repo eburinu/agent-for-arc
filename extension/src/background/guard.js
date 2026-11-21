@@ -1,4 +1,4 @@
-// claude-for-arc: what the model is allowed to touch.
+// Agent for Arc: what the model is allowed to touch.
 //
 // Every tool call from the server passes through checkCall() before the
 // upstream OpenDia handler runs it. The rules, all set from the popup:
@@ -59,8 +59,8 @@ chrome.storage.onChanged.addListener((changes, area) => {
   }
 });
 
-// key.json is written into this extension's folder by the claude-for-arc
-// connector (server/deploy.js). Checked before every connection so a new key
+// key.json is written into this extension's folder by the Agent for Arc
+// installer (server/deploy.js). Checked before every connection so a new key
 // is picked up without the user doing anything.
 export async function adoptBundledKey() {
   let token;
@@ -167,7 +167,7 @@ async function targetTab(params, { allowUserActiveTab = false } = {}) {
   if (settings.scope === "own" && !agentTabs.has(tab.id) && !userTabAllowed) {
     throw new Refusal(
       `вкладка ${tab.id} открыта пользователем, а не агентом. Откройте свою через tab_create ` +
-        "или попросите пользователя разрешить «все вкладки» в окне claude-for-arc"
+        "или попросите пользователя разрешить «все вкладки» в окне Agent for Arc"
     );
   }
   const problem = urlProblem(tab.url || tab.pendingUrl, settings.blocklist, { allowBlank: true });
@@ -181,12 +181,12 @@ export async function checkCall(method, rawParams) {
   await ready;
   const params = { ...(rawParams || {}) };
 
-  if (settings.paused) throw new Refusal("пользователь поставил claude-for-arc на паузу");
+  if (settings.paused) throw new Refusal("пользователь поставил Agent for Arc на паузу");
   if (settings.readOnly && WRITE_TOOLS.has(method)) {
     throw new Refusal("включён режим «только чтение»: клики, ввод и изменения страниц запрещены");
   }
   if (HISTORY_TOOLS.has(method) && !settings.allowHistory) {
-    throw new Refusal("доступ к истории и закладкам выключен в окне claude-for-arc");
+    throw new Refusal("доступ к истории и закладкам выключен в окне Agent for Arc");
   }
 
   if (CONTENT_TOOLS.has(method)) {

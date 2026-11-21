@@ -16,7 +16,7 @@ const browserInfo = {
 };
 
 // ---------------------------------------------------------------------------
-// Connection to the claude-for-arc server
+// Connection to the local Agent for Arc server
 //
 // The server listens on ws://127.0.0.1:<port> (5555 by default). Before this
 // extension registers tools or runs a single command, both sides prove they
@@ -101,7 +101,7 @@ class ConnectionManager {
       const fail = (error) => { clearTimeout(timer); reject(error); };
       const timer = setTimeout(() => {
         if (this.mcpSocket === socket) this.closeSocket();
-        fail(new Error("Сервер claude-for-arc не ответил"));
+        fail(new Error("Локальный сервер Agent for Arc не ответил"));
       }, 8000);
 
       socket.onmessage = async (event) => {
@@ -126,7 +126,7 @@ class ConnectionManager {
             const expected = await hmacHex(token, "server", clientNonce, serverNonce);
             if (!constantTimeEqual(message.mac, expected)) {
               // Something answered on the port without knowing the token.
-              console.warn("claude-for-arc: server failed to prove the token; disconnecting");
+              console.warn("Agent for Arc: server failed to prove the token; disconnecting");
               this.closeSocket();
               this.setState("badkey");
               fail(new Error("Сервер на порту не знает ключ"));
@@ -141,7 +141,7 @@ class ConnectionManager {
             resolve();
           } else if (message.type === "auth_failed") {
             this.setState("badkey");
-            fail(new Error("Сервер отклонил ключ: проверьте, что он скопирован целиком"));
+            fail(new Error("Локальный ключ не принят. Проверьте установку и переподключитесь."));
           }
           return; // nothing else is accepted before both sides are verified
         }
@@ -253,7 +253,7 @@ function pingContentScript(tabId, timeoutMs) {
   });
 }
 
-// claude-for-arc: ask the page's script once; if it is not there (a fresh
+// Agent for Arc: ask the page's script once; if it is not there (a fresh
 // page), inject it right away and poll briefly, instead of three timed retries.
 async function ensureContentScriptReady(tabId) {
   const alive = await pingContentScript(tabId, 400).then((r) => r?.success, () => false);
@@ -348,7 +348,7 @@ async function runTool(method, rawParams) {
     try {
       checked = await guard.checkCall(method, rawParams);
     } catch (error) {
-      if (guard.isRefusal(error)) throw new Error(`claude-for-arc: ${error.message}`);
+      if (guard.isRefusal(error)) throw new Error(`Agent for Arc: ${error.message}`);
       throw error;
     }
     host = checked.host;
@@ -364,7 +364,7 @@ async function runTool(method, rawParams) {
 const RUN_STEPS_MAX = 100;
 const TAB_TOOLS = new Set(STEP_TOOLS.filter((t) => t !== "tab_create" && t !== "sleep"));
 
-// claude-for-arc: several actions in one call. Each step goes through the same
+// Agent for Arc: several actions in one call. Each step goes through the same
 // policy as a single call; the tab carries over from step to step.
 async function runSteps({ steps, stop_on_error = true, tab_id = null }) {
   if (!Array.isArray(steps) || steps.length === 0) throw new Error("run_steps: steps is empty");
@@ -441,7 +441,7 @@ async function executeTool(method, params, checked) {
           total_tabs: result.tabs.length,
           active_tab: result.tabs.find((tab) => tab.active)?.id || null,
           hidden_user_tabs: hiddenCount,
-          note: "claude-for-arc: only tabs opened by the agent are listed; the user's own tabs are hidden.",
+          note: "Agent for Arc: only tabs opened by the agent are listed; the user's own tabs are hidden.",
         };
       }
       return result;
@@ -506,7 +506,7 @@ async function sendToContentScript(action, data, targetTabId = null) {
   });
 }
 
-// claude-for-arc: resolve once a tab has finished loading, so the next tool
+// Agent for Arc: resolve once a tab has finished loading, so the next tool
 // call sees the new page rather than the one being replaced. With
 // requireLoading, a "complete" is only trusted after a "loading" (the old page
 // is already complete); a same-document #hash change never loads, so that case
@@ -698,7 +698,7 @@ async function createSingleTab(url, active, wait_for, timeout) {
   const newTab = await browser.tabs.create(createProperties);
   console.log(`📝 Tab created:`, { id: newTab.id, url: newTab.url, pendingUrl: newTab.pendingUrl });
   
-  // Wait for the page to load (claude-for-arc: was a fixed 500ms)
+  // Wait for the page to load (Agent for Arc: was a fixed 500ms)
   if (url) {
     await waitForTabLoad(newTab.id, timeout);
     
@@ -1371,11 +1371,11 @@ function getSelectionFunction() {
 // Startup, reconnection and popup messages
 
 function tryConnect() {
-  connectionManager.connect().catch((error) => console.log("claude-for-arc:", error.message));
+  connectionManager.connect().catch((error) => console.log("Agent for Arc:", error.message));
 }
 
 // MV3 workers sleep; an alarm wakes this one to reconnect when the server
-// (started by Claude) comes up later or restarts.
+// comes up later or restarts.
 chrome.alarms.create(RECONNECT_ALARM, { periodInMinutes: 0.5 });
 chrome.alarms.onAlarm.addListener((alarm) => {
   if (alarm.name === RECONNECT_ALARM && !connectionManager.getStatus().connected) tryConnect();
