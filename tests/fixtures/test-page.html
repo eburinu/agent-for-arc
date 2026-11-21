@@ -83,8 +83,15 @@
     <button id="select-long-text" type="button">Select long text</button>
     <button id="reload" type="button">Reload fixture</button>
     <p id="navigation-result"></p>
+    <label for="disk-size">Размер диска</label>
+    <input id="disk-size" inputmode="numeric" value="10">
+    <div id="disk-slider-label">Размер SSD</div>
+    <div id="disk-slider" role="slider" tabindex="0" aria-labelledby="disk-slider-label"
+         aria-valuemin="10" aria-valuemax="100" aria-valuenow="20" aria-valuetext="20 ГиБ">SSD</div>
+    <div role="spinbutton" tabindex="0" aria-label="Свободное место" aria-valuenow="0">Место</div>
     <script>
       const longText = document.getElementById("long-text");
+      document.getElementById("disk-size").value = "20";
       longText.textContent = "A".repeat(650) + " LONG_TEXT_END";
       document.getElementById("select-long-text").addEventListener("click", () => {
         getSelection().selectAllChildren(longText);

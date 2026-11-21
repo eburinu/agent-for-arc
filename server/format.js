@@ -520,6 +520,9 @@ function formatElementStateResult(result, metadata) {
     summary += `
 📝 **Current Value**: "${result.current_value}"`;
   }
+  if (result.value_text && result.value_text !== result.current_value) {
+    summary += `\n📝 **Value Text**: "${result.value_text}"`;
+  }
 
   return `${summary}
 

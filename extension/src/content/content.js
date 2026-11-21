@@ -145,6 +145,8 @@ const CLICKABLE =
 const FIELDS =
   'input:not([type="hidden"]):not([type="submit"]):not([type="button"]):not([type="checkbox"]):not([type="radio"]), ' +
   'textarea, select, [contenteditable=""], [contenteditable="true"], [role="textbox"], [role="combobox"], [role="searchbox"]';
+const ARIA_NUMERIC_FIELDS = '[role="slider"], [role="spinbutton"]';
+const NUMERIC_FIELDS = `input[type="number"], input[type="range"], input[inputmode="numeric"], input[inputmode="decimal"], ${ARIA_NUMERIC_FIELDS}`;
 
 // How well a candidate's names match the wanted text: 3 exact, 2 prefix, 1 contains.
 function matchScore(names, wanted) {
@@ -178,14 +180,12 @@ function fieldNames(element) {
     element.getAttribute("aria-placeholder"),
     element.getAttribute("data-placeholder"),
     element.getAttribute("title"),
-    element.getAttribute("name"),
-    element.id,
   ];
   for (const label of element.labels || []) names.push(label.innerText);
   for (const id of (element.getAttribute("aria-labelledby") || "").split(/\s+/)) {
     if (id) names.push(document.getElementById(id)?.innerText);
   }
-  return names;
+  return [...names, element.getAttribute("name"), element.id];
 }
 
 class BrowserAutomation {
@@ -257,14 +257,24 @@ class BrowserAutomation {
           if (!element) {
             throw new Error(`Element not found: ${data.element_id}`);
           }
+          const sensitive = isSensitiveField(element);
+          const numericWidget = !sensitive && element.matches(ARIA_NUMERIC_FIELDS);
           result = {
             element_id: data.element_id,
             element_name: this.getElementName(element),
             state: this.getElementState(element),
-            current_value: isSensitiveField(element)
+            current_value: sensitive
               ? "[скрыто claude-for-arc]"
               : this.getElementValue(element),
           };
+          if (numericWidget) {
+            // For custom controls ARIA exposes the current value. Native
+            // controls already report their live value from the DOM property.
+            if (!["INPUT", "TEXTAREA", "SELECT"].includes(element.tagName)) {
+              result.current_value = element.getAttribute("aria-valuenow") ?? result.current_value;
+            }
+            result.value_text = element.getAttribute("aria-valuetext");
+          }
           break;
         case "get_page_links":
           result = await this.getPageLinks(data);
@@ -1610,7 +1620,8 @@ class BrowserAutomation {
       const wantField = action === "element_fill" || (label && !text);
       const wanted = norm(text || label);
       describe = wantField ? `поле «${text || label}»` : `элемент «${text || label}»`;
-      const pool = [...document.querySelectorAll(wantField ? FIELDS : CLICKABLE)].filter(isShown);
+      const fields = action === "get_element_state" ? `${FIELDS}, ${ARIA_NUMERIC_FIELDS}` : FIELDS;
+      const pool = [...document.querySelectorAll(wantField ? fields : CLICKABLE)].filter(isShown);
       const scored = pool
         .map((el) => ({ el, score: matchScore(wantField ? fieldNames(el) : clickableNames(el), wanted) }))
         .filter((c) => c.score > 0);
@@ -1739,9 +1750,9 @@ class BrowserAutomation {
   }
 
   getElementName(element) {
-    if (element.tagName === "SELECT") {
+    if (element.tagName === "SELECT" || element.matches(NUMERIC_FIELDS)) {
       const name = fieldNames(element).find(candidate => candidate?.trim());
-      return name ? name.replace(/\s+/g, " ").trim() : "select";
+      return name ? name.replace(/\s+/g, " ").trim() : element.tagName.toLowerCase();
     }
     return (
       element.getAttribute("aria-label") ||
@@ -1823,7 +1834,7 @@ class BrowserAutomation {
     const type = (element.getAttribute("type") || "").toLowerCase();
     if (tag === "BUTTON" || role === "button" || (tag === "INPUT" && ["submit", "button", "reset"].includes(type))) return "button";
     if (tag === "A" || role === "link") return "link";
-    if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" || element.isContentEditable || role === "textbox" || role === "searchbox") return "input";
+    if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" || element.isContentEditable || role === "textbox" || role === "searchbox" || element.matches(ARIA_NUMERIC_FIELDS)) return "input";
     return null;
   }
 
@@ -1967,7 +1978,7 @@ class BrowserAutomation {
 
   async quickViewportScan(intent_hint, maxResults = 3) {
     const candidates = document.querySelectorAll(
-      'button, input, a[href], [role="button"], textarea'
+      `button, input, a[href], [role="button"], textarea, ${ARIA_NUMERIC_FIELDS}`
     );
     const visibleElements = Array.from(candidates)
       .filter((el) => this.isLikelyVisible(el))
@@ -2053,7 +2064,7 @@ class BrowserAutomation {
     const elements = [];
     const areaSelectors = {
       buttons: 'button, [role="button"], input[type="submit"]',
-      forms: 'input, textarea, select, [contenteditable="true"]',
+      forms: `input, textarea, select, [contenteditable="true"], ${ARIA_NUMERIC_FIELDS}`,
       navigation: 'nav a, .nav-item, [role="navigation"] a',
       search_elements:
         '[type="search"], [role="searchbox"], [placeholder*="search" i]',
@@ -2085,7 +2096,7 @@ class BrowserAutomation {
     const relevantElements = document.querySelectorAll(`
       button, input, select, textarea, a[href],
       [role="button"], [role="textbox"], [role="searchbox"],
-      [aria-label], [data-testid], [contenteditable="true"]
+      [aria-label], [data-testid], [contenteditable="true"], ${ARIA_NUMERIC_FIELDS}
     `);
 
     const elements = Array.from(relevantElements)

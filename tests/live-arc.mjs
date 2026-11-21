@@ -168,6 +168,19 @@ await call("press_key", { selector: "#records", key: "ArrowDown", tab_id: tabId 
 r = await call("element_get_state", { selector: "#records", tab_id: tabId });
 check("ArrowDown skips a disabled native option", /Current Value.*"txt"/.test(r.text), r.text);
 
+await call("page_scroll", { direction: "bottom", tab_id: tabId });
+r = await call("page_analyze", { intent_hint: "Размер диска", max_results: 5, tab_id: tabId });
+check("discovery finds a numeric text input by its associated label", !!idFor(r.text, "Размер диска"), r.text);
+r = await call("element_get_state", { label: "Размер диска", tab_id: tabId });
+check("numeric text input reports the live value instead of the HTML default", /Current Value.*"20"/.test(r.text), r.text);
+r = await call("page_analyze", { intent_hint: "Размер SSD", max_results: 5, tab_id: tabId });
+check("discovery finds an ARIA slider by its accessible label", !!idFor(r.text, "Размер SSD"), r.text);
+r = await call("element_get_state", { label: "Размер SSD", tab_id: tabId });
+check("ARIA slider reports both the numeric and formatted values",
+  /Current Value.*"20"/.test(r.text) && /Value Text.*"20 ГиБ"/.test(r.text), r.text);
+r = await call("element_get_state", { label: "Свободное место", tab_id: tabId });
+check("ARIA spinbutton preserves zero", /Current Value.*"0"/.test(r.text), r.text);
+
 for (const [index, wait_after] of [1000, 0].entries()) {
   r = await call("run_steps", { tab_id: tabId, steps: [
     { tool: "element_click", args: { selector: "#reload", wait_after } },
